@@ -48,10 +48,20 @@ img.face{width:72px;height:72px;object-fit:cover;border-radius:12px}
 img.facebig{max-width:180px;max-height:180px;border-radius:14px;display:block;margin:8px auto}
 .hide{display:none}
 table{width:100%;border-collapse:collapse;font-size:14px}td{padding:4px;border-bottom:1px solid var(--pri2)}
+header .hb{background:rgba(255,255,255,.2);color:#fff;min-height:40px;min-width:40px;padding:6px 12px;font-size:15px;border-radius:99px}
+.hdr-r{display:flex;gap:6px;align-items:center}
+button.xl{display:block;width:100%;min-height:56px;font-size:18px;margin-top:10px}
+.tour{min-height:62vh;display:flex;flex-direction:column;justify-content:center}.tour h2{font-size:24px}.tour p,.tour li{font-size:17px}.tour li{padding:5px 0}
+.dots{display:flex;gap:6px;justify-content:center;margin:6px 0 12px}.dots i{width:10px;height:10px;border-radius:10px;background:var(--pri2)}.dots i.on{background:var(--pri)}
+.prompt{font-size:17px;font-weight:600;margin:10px 0 8px}
+.qa{display:flex;gap:8px;margin-top:10px}.qa button{flex:1;min-height:50px}
+.grades button{min-height:56px}
+input{min-height:48px;font-size:17px}
+nav button{min-height:56px}
 </style>
 </head>
 <body>
-<header><h1 id="ttl">Memory Trainer</h1><span class="streak" id="streak">🔥 0</span></header>
+<header><h1 id="ttl">Memory Trainer</h1><div class="hdr-r"><span class="streak" id="streak">🔥 0</span><button class="hb" id="hq" aria-label="How to use" title="How to use">?</button><button class="hb" id="hh">Help</button></div></header>
 <main id="app"></main>
 <nav id="nav"></nav>
 <script>
@@ -75,12 +85,14 @@ function freshState(){
   const major={};DEFAULT_MAJOR.forEach((w,i)=>major[pad2(i)]=w);
   const skills={};Object.keys(SKILLS).forEach(k=>skills[k]={level:1,log:[],sinceChange:0});
   return {v:1,cards:[],palaces:[],major,skills,lessonsDone:{},streak:{count:0,best:0,last:null},
-    adaptLog:[],settings:{minutes:10},sessions:[],lastBackup:null,lastWarmupMsg:''};
+    adaptLog:[],settings:{minutes:10},sessions:[],lastBackup:null,lastWarmupMsg:'',onboarded:false,starterDone:false};
 }
 let S;
 function load(){try{S=JSON.parse(localStorage.getItem(KEY))||freshState();}catch(e){S=freshState();}
   const f=freshState();for(const k in f)if(S[k]===undefined)S[k]=f[k];
-  for(const k in SKILLS)if(!S.skills[k])S.skills[k]=f.skills[k];}
+  for(const k in SKILLS)if(!S.skills[k])S.skills[k]=f.skills[k];
+  S.cards.forEach(c=>{if(c.seen===undefined)c.seen=c.reps>0||c.deck==='numbers';});
+  S.palaces.forEach(p=>p.loci.forEach(l=>{if(l.seen===undefined)l.seen=false;}));}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){alert('Storage is full. Export a backup and remove some photos.');}}
 
 /* ================= Major system ================= */
@@ -123,7 +135,7 @@ function dateToChunks(dstr,tstr){ // yyyy-mm-dd, hh:mm
   return out;}
 
 /* ================= SM-2 with adaptive multiplier ================= */
-function newCard(deck,front,back,extra){return {id:uid(),deck,front,back,hint:(extra&&extra.hint)||'',extra:extra||{},ef:2.5,reps:0,ivl:0,due:today(),lapses:0,created:NOW()};}
+function newCard(deck,front,back,extra){return {id:uid(),deck,front,back,hint:(extra&&extra.hint)||'',extra:extra||{},ef:2.5,reps:0,ivl:0,due:today(),lapses:0,created:NOW(),seen:false};}
 function sm2(card,q,mult){
   mult=mult||1;
   if(q<3){card.reps=0;card.ivl=1;card.lapses++;}
@@ -174,67 +186,91 @@ function levelDesc(k,l){return ({
 const ENCOURAGE=["Tricky ones are where the learning happens — that’s your brain doing the work.","Slower is fine. Accuracy first, speed comes by itself.","You’re rebuilding a skill, not taking a test. Let’s warm up with a few easy wins.","Every miss today is a card that comes back sooner — that’s the system working for you.","Short and steady beats long and stressful. Today is a lighter session."];
 const PRAISE=["Nice — you’re ready for a bit more.","That’s strong recall. Stretching you a little.","Your memory is getting faster. Keep the streak going!"];
 
-/* ================= Drill generators (level-aware) ================= */
-function numberTask(skill){const sk=S.skills.numbers,p=params('numbers');let lvl=sk.level;
-  const max=[0,20,50,100,100,100][lvl];
-  if(lvl>=5&&!p.chunk){const a=pad2(rnd(100)),b=pad2(rnd(100));return {type:'num4',a,b,timed:true};}
-  if(lvl>=4&&!p.chunk&&Math.random()<0.4){const n=pad2(rnd(100));return {type:'wordnum',n};}
-  return {type:'num',n:pad2(rnd(max)),hint:p.hint};}
-function dateTask(){const lvl=S.skills.dates.level,p=params('dates');
-  const d=new Date(2026,0,1+rnd(365*3));const y=d.getFullYear(),m=pad2(d.getMonth()+1),dd=pad2(d.getDate()),t=pad2(7+rnd(12))+':'+['00','15','30','45'][rnd(4)];
+/* ================= Drill generators (level-aware, learned items only) ================= */
+const STARTER=[['Eggs','A giant egg wearing sunglasses rolls down your driveway.'],['Keys','Your keys hang from the front door like wind chimes, jangling loudly.'],['Umbrella','An umbrella pops open in the kitchen and rains all over the bench.'],['Stamps','Postage stamps are stuck all over a very annoyed cat.'],['Basil','A basil plant is growing out of your shoe. You can smell it.']];
+function ensureStarter(){let cs=S.cards.filter(c=>c.deck==='everyday');
+  if(cs.length<STARTER.length){S.cards=S.cards.filter(c=>c.deck!=='everyday');cs=STARTER.map((x,i)=>newCard('everyday',`Starter list · item ${i+1} of ${STARTER.length}`,x[0],{hint:x[1],n:i+1}));S.cards.push(...cs);save();}
+  return cs.map(c=>c.id);}
+function learnedNums(){return [...new Set(S.cards.filter(c=>c.deck==='numbers'&&c.seen).map(c=>c.front))].sort();}
+function numsUnlocked(){return !!S.lessonsDone.major;}
+function hasLearned(){return Object.keys(S.lessonsDone).length>0||S.cards.some(c=>c.reps>0);}
+function skillOf(c){return c&&c.deck in SKILLS?c.deck:null;}
+function numberTask(){const L=learnedNums();if(!L.length)return null;const sk=S.skills.numbers,p=params('numbers'),lvl=sk.level;
+  const max=[0,20,50,100,100,100][lvl];let pool=L.filter(n=>+n<max);if(!pool.length)pool=L;const pick=()=>pool[rnd(pool.length)];
+  if(lvl>=5&&!p.chunk&&pool.length>=2)return {type:'num4',a:pick(),b:pick(),timed:true};
+  if(lvl>=4&&!p.chunk&&pool.length>=4&&Math.random()<0.4)return {type:'wordnum',n:pick()};
+  return {type:'num',n:pick(),hint:p.hint};}
+function dateTask(){if(!S.lessonsDone.dates)return null;const Ls=new Set(learnedNums());if(!Ls.size)return null;const lvl=S.skills.dates.level,p=params('dates');
   let parts=['Day'];if(lvl>=2)parts.push('Month');if(lvl>=3)parts.push('Year');if(lvl>=4)parts.push('Hour','Minute');
   if(p.chunk&&parts.length>1)parts=parts.slice(0,Math.max(1,parts.length-2)); // smaller chunks when struggling
-  return {type:'date',date:`${y}-${m}-${dd}`,time:t,parts,hint:p.hint,timed:lvl>=5};}
-function palaceTasks(count){const pals=S.palaces.filter(p=>p.loci.some(l=>l.item));if(!pals.length)return [];
+  for(let k=0;k<80;k++){const d=new Date(2026,0,1+rnd(365*3));const y=d.getFullYear(),m=pad2(d.getMonth()+1),dd=pad2(d.getDate()),t=pad2(7+rnd(12))+':'+['00','15','30','45'][rnd(4)];
+    const ch=dateToChunks(`${y}-${m}-${dd}`,parts.includes('Hour')?t:'').filter(c=>parts.includes(c.label));
+    if(ch.every(c=>Ls.has(c.c)))return {type:'date',date:`${y}-${m}-${dd}`,time:t,parts,hint:p.hint,timed:lvl>=5};}
+  return null;}
+function palaceTasks(count){const pals=S.palaces.filter(p=>p.loci.some(l=>l.item&&l.seen));if(!pals.length)return [];
   const lvl=S.skills.palace.level,p=params('palace');const pal=pals[rnd(pals.length)];
-  let loci=pal.loci.map((l,i)=>({l,i})).filter(x=>x.l.item);
+  let loci=pal.loci.map((l,i)=>({l,i})).filter(x=>x.l.item&&x.l.seen);
   const cap=p.chunk?Math.min(5,[0,5,10,99,99,99][lvl]):[0,5,10,99,99,99][lvl];loci=loci.slice(0,cap);
   if(lvl===4&&!p.chunk)loci.reverse();if(lvl>=5&&!p.chunk)loci=shuffle(loci);
   return loci.slice(0,Math.max(count,3)).map(x=>({type:'locus',pid:pal.id,i:x.i,hint:p.hint}));}
+const RECALL_TYPES=['review','num','wordnum','num4','date','locus','listRecall'];
+const STUDY_TYPES=['study','studyLocus','learnNums','studyNums','lesson'];
 
 /* ================= Session composer ================= */
+// Rule: nothing is ever recalled before it has been studied. New things get a study card first;
+// their first recall comes at the end of the same session.
 function dueCards(){const t=today();return S.cards.filter(c=>c.due<=t);}
 function composeSession(){
   const om=overallMode(),budget={support:12,steady:18,stretch:24}[om];
   const profs={};for(const k in SKILLS)profs[k]=profile(k);
-  const has={names:S.cards.some(c=>c.deck==='names'),palace:S.palaces.some(p=>p.loci.some(l=>l.item)),numbers:true,dates:true};
-  const tasks=[],notes=[];
-  // 1. warm-up for weak skills (easy wins first)
+  const head=[],learn=[],recall=[],fresh=[],notes=[];
+  // 1. next lesson (learning always comes before practice)
+  const next=LESSONS.find(l=>!S.lessonsDone[l.id]);
+  const teach=next&&(om==='stretch'||Object.keys(S.lessonsDone).length<3)?next:null;
+  const firstDay=teach&&teach.id==='vivid'&&!S.starterDone;
+  if(firstDay)head.push({type:'msg',text:'Welcome! Today you’ll learn one simple trick, use it on 5 everyday things, then see how many you remember. You will never be tested on anything you haven’t been shown first.'});
+  if(teach)learn.push({type:'lesson',lesson:teach.id});
+  const majorReady=numsUnlocked()||(teach&&teach.id==='major');
+  const has={names:S.cards.some(c=>c.deck==='names'&&c.seen),palace:S.palaces.some(p=>p.loci.some(l=>l.item&&l.seen)),numbers:numsUnlocked()&&learnedNums().length>0,dates:!!S.lessonsDone.dates&&numsUnlocked()&&learnedNums().length>0};
+  // 2. gentle warm-up for weak skills, using things already learned
   const weak=Object.values(profs).filter(p=>p.mode==='support'&&has[p.skill]);
-  if(weak.length){tasks.push({type:'msg',text:ENCOURAGE[rnd(ENCOURAGE.length)]});
-    for(const p of weak){const lid=SKILL_LESSON[p.skill];tasks.push({type:'example',lesson:lid});notes.push(`${SKILLS[p.skill]}: warm-up + worked example (${p.why.split(',')[0]}).`);}
-    for(let i=0;i<2;i++)tasks.push({type:'num',n:pad2(rnd(10)),hint:true,warm:true});}
-  // 2. due reviews, weak skills first, lowest ease first; capped
-  const weight=k=>profs[k].mode==='support'?0:profs[k].mode==='steady'?1:2;
-  const due=dueCards().sort((a,b)=>weight(a.deck)-weight(b.deck)||a.ef-b.ef);
-  const reviewCap=Math.round(budget*0.6);due.slice(0,reviewCap).forEach(c=>tasks.push({type:'review',id:c.id}));
+  if(weak.length){head.push({type:'msg',text:ENCOURAGE[rnd(ENCOURAGE.length)]});
+    for(const p of weak){head.push({type:'example',lesson:SKILL_LESSON[p.skill]});notes.push(`${SKILLS[p.skill]}: easy start + worked example (${p.why.split(',')[0]}).`);}
+    if(has.numbers){const easy=learnedNums().slice(0,10);for(let i=0;i<2;i++)head.push({type:'num',n:easy[rnd(easy.length)],hint:true,warm:true});}}
+  // 3. study new things
+  if(firstDay){ensureStarter().forEach(id=>learn.push({type:'study',id}));}
+  const newCap={support:3,steady:5,stretch:8}[om];
+  const unseen=S.cards.filter(c=>!c.seen&&c.deck!=='palace'&&c.deck!=='everyday'&&(c.deck!=='numbers'||majorReady)).slice(0,newCap);
+  unseen.forEach(c=>{learn.push({type:'study',id:c.id});fresh.push({type:'review',id:c.id,fresh:true});});
+  let nl=0;S.palaces.forEach(p=>p.loci.forEach((l,i)=>{if(l.item&&!l.seen&&nl<newCap){nl++;learn.push({type:'studyLocus',pid:p.id,i});fresh.push({type:'locus',pid:p.id,i,fresh:true});}}));
+  if(majorReady){const np=params('numbers').newItems,haveNums=new Set(S.cards.filter(c=>c.deck==='numbers').map(c=>c.front));
+    const newNums=[];for(let i=0;i<100&&newNums.length<np;i++){const k=pad2(i);if(!haveNums.has(k))newNums.push(k);}
+    if(newNums.length){learn.push({type:'learnNums',nums:newNums});shuffle(newNums).slice(0,3).forEach(n=>fresh.push({type:'num',n,hint:true,fresh:true}));}}
+  if(firstDay){fresh.push({type:'msg',text:'Nice work. Now look away from the screen and slowly count back from 10. Then tap the button and we’ll see what stuck.',btn:'Ready to remember'},{type:'listRecall',ids:ensureStarter()});}
+  // 4. due reviews (only things already studied), weak skills first
+  const weight=k=>!k?1:profs[k].mode==='support'?0:profs[k].mode==='steady'?1:2;
+  const due=dueCards().filter(c=>c.seen&&!unseen.includes(c)&&(c.deck!=='numbers'||numsUnlocked())&&(c.deck!=='palace'||S.palaces.some(p=>p.loci.some(l=>l.id===c.extra.locus&&l.seen)))).sort((a,b)=>weight(skillOf(a))-weight(skillOf(b))||a.ef-b.ef);
+  const reviewCap=Math.round(budget*0.6);due.slice(0,reviewCap).forEach(c=>recall.push({type:'review',id:c.id}));
   if(due.length>reviewCap)notes.push(`${due.length-reviewCap} reviews held over to keep today to about ${S.settings.minutes} minutes.`);
-  // 3. new major-system pairs (amount depends on numbers mode)
-  const np=params('numbers').newItems,haveNums=new Set(S.cards.filter(c=>c.deck==='numbers').map(c=>c.front));
-  const newNums=[];for(let i=0;i<100&&newNums.length<np;i++){const k=pad2(i);if(!haveNums.has(k))newNums.push(k);}
-  if(newNums.length)tasks.push({type:'learnNums',nums:newNums});
-  // 4. drills weighted toward weak skills, keep at least one strong-skill win
-  const remaining=Math.max(4,budget-tasks.filter(t=>t.type!=='msg'&&t.type!=='example').length);
-  const ks=Object.keys(SKILLS).filter(k=>has[k]&&k!=='names');
-  const w=ks.map(k=>{const p=profs[k];return 0.5+(p.acc==null?0.5:(1-p.acc))*2+(p.mode==='support'?1:0);});
-  const tot=w.reduce((a,b)=>a+b,0);
-  ks.forEach((k,i)=>{let n=Math.max(1,Math.round(remaining*w[i]/tot));n=Math.min(n,params(k).drillCount+2);
-    for(let j=0;j<n;j++){if(k==='numbers')tasks.push(numberTask());else if(k==='dates')tasks.push(dateTask());}
-    if(k==='palace')palaceTasks(n).forEach(t=>tasks.push(t));});
+  // 5. drills, weighted toward weak skills, on learned material only
+  const ks=['numbers','dates','palace'].filter(k=>has[k]);
+  if(ks.length){const remaining=Math.max(4,budget-recall.length-fresh.length-learn.length);
+    const w=ks.map(k=>{const p=profs[k];return 0.5+(p.acc==null?0.5:(1-p.acc))*2+(p.mode==='support'?1:0);}),tot=w.reduce((a,b)=>a+b,0);
+    ks.forEach((k,i)=>{let n=Math.max(1,Math.round(remaining*w[i]/tot));n=Math.min(n,params(k).drillCount+2);
+      if(k==='palace')palaceTasks(n).forEach(t=>recall.push(t));
+      else for(let j=0;j<n;j++){const t=k==='numbers'?numberTask():dateTask();if(t)recall.push(t);}});}
   // confidence win from strongest skill
   const strong=Object.values(profs).filter(p=>p.n>=6&&has[p.skill]).sort((a,b)=>(b.acc||0)-(a.acc||0))[0];
-  if(strong&&strong.mode!=='support'){if(strong.skill==='numbers')tasks.push({type:'num',n:pad2(rnd(20)),win:true});
-    else if(strong.skill==='dates')tasks.push({...dateTask(),parts:['Day'],win:true});
-    else if(strong.skill==='palace'){const pt=palaceTasks(1)[0];if(pt)tasks.push({...pt,win:true});}
-    else if(strong.skill==='names'){const nc=S.cards.filter(c=>c.deck==='names'&&c.reps>0).sort((a,b)=>b.ef-a.ef)[0];if(nc&&!tasks.some(t=>t.id===nc.id))tasks.push({type:'review',id:nc.id,win:true});}}
-  // 5. next lesson when doing well (or first-time user)
-  const next=LESSONS.find(l=>!S.lessonsDone[l.id]);
-  if(next&&(om==='stretch'||Object.keys(S.lessonsDone).length<2))tasks.push({type:'lesson',lesson:next.id});
-  Object.values(profs).forEach(p=>{if(p.mode==='stretch'&&has[p.skill])notes.push(`${SKILLS[p.skill]}: stretch — ${PRAISE[rnd(PRAISE.length)]}`);});
-  // interleave middle section lightly (keep warm-up at front, lesson at end)
-  const head=tasks.filter(t=>t.warm||t.type==='msg'||t.type==='example'),tail=tasks.filter(t=>t.type==='lesson'),mid=tasks.filter(t=>!head.includes(t)&&!tail.includes(t));
-  const locus=mid.filter(t=>t.type==='locus'),other=shuffle(mid.filter(t=>t.type!=='locus'&&t.type!=='learnNums')),learn=mid.filter(t=>t.type==='learnNums');
-  return {mode:om,tasks:[...head,...learn,...other.slice(0,Math.ceil(other.length/2)),...locus,...other.slice(Math.ceil(other.length/2)),...tail],notes};
+  if(strong&&strong.mode!=='support'){let t=null;if(strong.skill==='numbers'){t=numberTask();if(t)t={type:'num',n:t.n||t.a,win:true};}
+    else if(strong.skill==='dates'){t=dateTask();if(t)t={...t,win:true};}
+    else if(strong.skill==='palace'){t=palaceTasks(1)[0];if(t)t={...t,win:true};}
+    else if(strong.skill==='names'){const nc=S.cards.filter(c=>c.deck==='names'&&c.reps>0&&c.seen).sort((a,b)=>b.ef-a.ef)[0];if(nc&&!recall.some(x=>x.id===nc.id))t={type:'review',id:nc.id,win:true};}
+    if(t)recall.push(t);}
+  Object.values(profs).forEach(p=>{if(p.mode==='stretch'&&has[p.skill])notes.push(`${SKILLS[p.skill]}: faster pace — ${PRAISE[rnd(PRAISE.length)]}`);});
+  const locus=recall.filter(t=>t.type==='locus'),other=shuffle(recall.filter(t=>t.type!=='locus'));
+  const tasks=[...head,...learn,...other.slice(0,Math.ceil(other.length/2)),...locus,...other.slice(Math.ceil(other.length/2)),...fresh];
+  const empty=!tasks.some(t=>RECALL_TYPES.includes(t.type)||STUDY_TYPES.includes(t.type));
+  return {mode:om,tasks:empty?[]:tasks,notes,empty};
 }
 function bumpStreak(){const t=today(),st=S.streak;if(st.last===t)return;
   st.count=(st.last===t-1)?st.count+1:1;st.last=t;st.best=Math.max(st.best,st.count);}
@@ -242,7 +278,7 @@ function bumpStreak(){const t=today(),st=S.streak;if(st.last===t)return;
 /* ================= Lessons (original content) ================= */
 const LESSONS=[
 {id:'vivid',title:'1. Make it vivid',skill:null,steps:['Memory loves pictures, movement, emotion, smell, sound and the absurd. Plain facts slide off; strange images stick.','Turn the thing into a concrete picture. Make it huge, tiny, moving, funny or a bit gross.','Connect it to something you already know. Spend 3–5 seconds really “seeing” it.'],
- example:'Remember to buy eggs, matches and basil: picture a giant egg striking a match on its own shell and setting a bunch of basil alight — smell the smoke.',practice:null},
+ example:'Remember to buy eggs, matches and basil: picture a giant egg striking a match on its own shell and setting a bunch of basil alight — smell the smoke.',practice:'starter'},
 {id:'story',title:'2. Link it into a story',skill:null,steps:['For a short list, link item 1 to item 2, item 2 to item 3, and so on, with a crazy action between each pair.','Recall by replaying the story from the start.'],
  example:'Agenda: budget → roof → parking → doors. A pile of budget coins crashes through the roof onto a parked car, whose horn blasts a door shut.',practice:null},
 {id:'palace',title:'3. The memory palace',skill:'palace',steps:['Choose a place you know well (your home, your workplace, a regular drive).','Pick a fixed route and 10 stops along it (loci): front gate, door, counter, crystal shelf…','Place one vivid image of each item at a stop, interacting with it.','To recall, walk the route in your mind and “look” at each stop.'],
@@ -261,112 +297,230 @@ const LESSONS=[
 const lessonById=id=>LESSONS.find(l=>l.id===id);
 
 /* ================= UI ================= */
+const APP_VERSION='3.0';
 const app=document.getElementById('app');
 const TABS=[['today','☀︎','Today'],['learn','📖','Learn'],['palaces','🏛','Palaces'],['people','🙂','People'],['numbers','#','Numbers'],['progress','📈','Progress'],['more','⋯','More']];
-let tab='today',session=null,ui={};
+const MODE_LABEL={support:'gentle',steady:'normal',stretch:'faster'};
+let tab='today',session=null,ui={},tour=null;
 function nav(){document.getElementById('nav').innerHTML=TABS.map(t=>`<button data-tab="${t[0]}" class="${tab===t[0]?'on':''}"><b>${t[1]}</b>${t[2]}</button>`).join('');
   document.getElementById('streak').textContent='🔥 '+S.streak.count+(S.streak.best>S.streak.count?' (best '+S.streak.best+')':'');}
 function go(t){tab=t;ui={};render();window.scrollTo(0,0);}
-function render(){nav();(VIEWS[tab]||VIEWS.today)();}
-document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b){if(session&&!confirm('Leave the session? Progress so far is saved.'))return;session=null;go(b.dataset.tab);}});
+function render(){nav();if(tour!==null)return renderTour();(VIEWS[tab]||VIEWS.today)();}
+document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b){if(session&&tour===null&&!confirm('Leave today’s practice? Progress so far is saved.'))return;tour=null;session=null;go(b.dataset.tab);}});
+document.getElementById('hq').addEventListener('click',()=>{tour=0;render();window.scrollTo(0,0);});
+document.getElementById('hh').addEventListener('click',()=>{if(session&&tour===null&&!confirm('Leave today’s practice? Progress so far is saved.'))return;tour=null;session=null;go('help');});
+
+/* ---------- first-run tour ---------- */
+const TOUR=[
+ {h:'Welcome to Memory Trainer 👋',b:`<p>This app helps you remember <b>names, faces, places, numbers, dates and times</b> using proven memory tricks.</p><p>It’s free, works offline, and everything you type stays on this phone.</p>`},
+ {h:'Learn first, then remember',b:`<p>You will <b>never</b> be tested on something you haven’t been shown.</p><ol><li>A <b>Study</b> card shows you the new thing and a picture to imagine. Tap <b>Got it</b>.</li><li>A few minutes later the app asks you to <b>remember</b> it.</li><li>It brings it back again just before you’d forget.</li></ol>`},
+ {h:'Your 10-minute daily routine',b:`<ol><li>Open the app and stay on <b>Today</b>.</li><li>Tap <b>Start today’s practice</b>.</li><li>Study anything new, then answer the questions.</li><li>Rate how easy each one felt.</li></ol><p>Same time each day is best. Your streak 🔥 is at the top.</p>`},
+ {h:'What the tabs do',b:`<ul class="clean"><li>☀︎ <b>Today</b> — your daily practice. Reviews happen here too.</li><li>📖 <b>Learn</b> — 8 short lessons, one trick each.</li><li>🏛 <b>Palaces</b> — build a “memory palace” from a place you know.</li><li>🙂 <b>People</b> — add someone right after you meet them.</li><li># <b>Numbers</b> — turn dates, times and numbers into pictures.</li><li>📈 <b>Progress</b> — how you’re going and what the app is adjusting.</li><li>⋯ <b>More</b> — backup and settings.</li></ul>`},
+ {h:'If you get stuck',b:`<p>Every question has three helpers:</p><ul class="clean"><li>💡 <b>Hint</b> — a nudge, not the answer.</li><li>👀 <b>Show me</b> — see the answer. It just comes back later, no penalty.</li><li>↩︎ <b>Skip — I haven’t learned this</b> — shows you the study card again. Never counts against you.</li></ul><p>The app goes slower when you’re finding it hard, and faster when you’re doing well. Tap <b>?</b> or <b>Help</b> at the top any time.</p>`},
+ {h:'Ready?',b:`<p>Lesson 1 takes about 3 minutes: one trick, then you’ll use it to remember 5 everyday things.</p>`,last:true}
+];
+function renderTour(){const i=tour,t=TOUR[i];
+  app.innerHTML=`<div class="card tour"><div class="dots">${TOUR.map((_,k)=>`<i class="${k===i?'on':''}"></i>`).join('')}</div><h2>${t.h}</h2>${t.b}
+  ${t.last?'<button class="xl" id="t1">Start Lesson 1</button><button class="xl sec" id="tx">Look around first</button>':'<button class="xl" id="tn">Next</button>'}
+  <div class="row" style="margin-top:6px">${i>0?'<button class="sec grow" id="tb">Back</button>':''}${t.last?'':'<button class="sec grow" id="ts">Skip tour</button>'}</div></div>`;
+  const close=()=>{tour=null;S.onboarded=true;save();};
+  const q=s=>app.querySelector(s);
+  if(q('#tn'))q('#tn').onclick=()=>{tour++;render();window.scrollTo(0,0);};
+  if(q('#tb'))q('#tb').onclick=()=>{tour--;render();};
+  if(q('#ts'))q('#ts').onclick=()=>{close();render();};
+  if(q('#tx'))q('#tx').onclick=()=>{close();render();};
+  if(q('#t1'))q('#t1').onclick=()=>{close();session=null;startLesson1();};}
+function startSession(s){session=s;session.i=0;session.results=[];session.start=NOW();session.notes=session.notes||[];tab='today';render();window.scrollTo(0,0);}
+function startLesson1(){if(!S.lessonsDone.vivid||!S.starterDone){const s=composeSession();if(s.tasks.some(t=>t.type==='lesson'&&t.lesson==='vivid'))return startSession(s);}
+  startStarter(true);}
+function startStarter(withLesson){const ids=ensureStarter();
+  startSession({mode:'steady',notes:[],tasks:[...(withLesson?[{type:'lesson',lesson:'vivid'}]:[]),...ids.map(id=>({type:'study',id})),
+    {type:'msg',text:'Now look away from the screen and slowly count back from 10. Then tap the button and we’ll see what stuck.',btn:'Ready to remember'},{type:'listRecall',ids}]});}
 
 const VIEWS={};
 VIEWS.today=function(){
   if(session)return renderSession();
-  const due=dueCards().length,done=S.streak.last===today(),om=overallMode();
+  const due=dueCards().filter(c=>c.seen).length,done=S.streak.last===today(),om=overallMode();
   const backupDue=!S.lastBackup||(NOW()-S.lastBackup>7*864e5);
-  app.innerHTML=`<div class="card"><h2>${done?'Done for today ✓':'Today’s session'}</h2>
-  <p class="mut">About ${S.settings.minutes} minutes · ${due} review${due===1?'':'s'} due · pace: <span class="pill ${om}">${om}</span></p>
-  <button id="start">${done?'Do a bonus session':'Start session'}</button></div>
-  ${backupDue&&(S.cards.length||S.palaces.length)?`<div class="msg">💾 It’s been a while since your last backup. <button class="ghost" data-go="more">Export now</button></div>`:''}
-  <div class="card"><h3>Quick add</h3><div class="row"><button class="sec small" data-go="people">+ Person</button><button class="sec small" data-go="palaces">+ Palace</button><button class="sec small" id="qdate">+ Date to remember</button></div></div>
-  <div class="card"><h3>How it adapts</h3><p class="mut">Each skill is tracked for accuracy, speed and trend. Doing well → longer gaps, more new items, harder versions and the next lesson. Struggling → fewer new items, shorter gaps, hints, smaller chunks and a warm-up. See <a href="#" data-go="progress">Progress</a>.</p></div>`;
-  app.querySelector('#start').onclick=()=>{session=composeSession();session.i=0;session.results=[];session.start=NOW();render();};
+  const people=S.cards.filter(c=>c.deck==='names').length,pal=S.palaces.length;
+  const steps=[];
+  if(!S.lessonsDone.vivid)steps.push(`<li class="row"><span class="grow">Start with Lesson 1 (3 minutes)</span><button class="small" id="l1">Start Lesson 1</button></li>`);
+  else if(!S.starterDone)steps.push(`<li class="row"><span class="grow">Try the 5-thing practice from Lesson 1</span><button class="small" id="sp">Start</button></li>`);
+  if(!people)steps.push(`<li class="row"><span class="grow">Met someone lately? Add them so you can practise their name.</span><button class="small sec" data-go="people">+ Person</button></li>`);
+  if(!pal&&Object.keys(S.lessonsDone).length>=1)steps.push(`<li class="row"><span class="grow">Build your first memory palace from your home.</span><button class="small sec" data-go="palaces">+ Palace</button></li>`);
+  app.innerHTML=`<div class="card"><h2>${done?'Done for today ✓':'Today’s practice'}</h2>
+  <p class="mut">About ${S.settings.minutes} minutes · ${due} review${due===1?'':'s'} ready · pace: <span class="pill ${om}">${MODE_LABEL[om]}</span></p>
+  <button class="xl" id="start">${done?'Do some extra practice':'Start today’s practice'}</button></div>
+  <div id="guide"></div>
+  ${steps.length?`<div class="card"><h3>Next steps</h3><ul class="clean">${steps.join('')}</ul></div>`:''}
+  ${backupDue&&(S.cards.length||S.palaces.length)?`<div class="msg">💾 It’s been a while since your last backup. <button class="ghost" data-go="more">Back up now</button></div>`:''}
+  <div class="card"><h3>Quick add</h3><div class="row"><button class="sec" data-go="people">+ Person</button><button class="sec" data-go="palaces">+ Palace</button><button class="sec" id="qdate">+ Date to remember</button></div></div>
+  <div class="card"><h3>New here?</h3><p class="mut">Tap <b>?</b> at the top for the 1-minute tour, or <b>Help</b> for step-by-step instructions.</p></div>`;
+  app.querySelector('#start').onclick=()=>{const s=composeSession();if(s.empty){showGuide();return;}startSession(s);};
+  const l1=app.querySelector('#l1');if(l1)l1.onclick=startLesson1;const sp=app.querySelector('#sp');if(sp)sp.onclick=()=>startStarter(false);
   app.querySelector('#qdate').onclick=()=>{go('numbers');ui.sub='dates';render();};
   bindGo();
 };
+function showGuide(){const g=app.querySelector('#guide');g.innerHTML=`<div class="card" id="emptyguide"><h3>Nothing to practise yet</h3><p>You’re all caught up — there’s nothing new to study and nothing due to remember today. Here’s what you can do:</p>
+  <button class="xl" data-go="learn">Open the next lesson</button><button class="xl sec" data-go="people">+ Add a person you’ve met</button><button class="xl sec" data-go="palaces">+ Build a memory palace</button><button class="xl sec" id="rp">Redo the 5-item practice</button></div>`;
+  bindGo();g.querySelector('#rp').onclick=()=>startStarter(false);g.scrollIntoView&&g.scrollIntoView();}
 function bindGo(){app.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.preventDefault();go(b.dataset.go);});}
 
 /* ---------- session runner ---------- */
 function renderSession(){
   const s=session;if(s.i>=s.tasks.length)return finishSession();
   const t=s.tasks[s.i],pct=Math.round(100*s.i/s.tasks.length),mins=Math.floor((NOW()-s.start)/6e4);
-  const head=`<div class="row mut"><span class="grow">Step ${s.i+1} of ${s.tasks.length} · ${mins} min</span><button class="ghost small" id="endnow">End</button></div><div class="bar"><i style="width:${pct}%"></i></div>`;
-  app.innerHTML=head+`<div class="card" id="task"></div>`;
+  const head=`<div class="row mut"><span class="grow">Step ${s.i+1} of ${s.tasks.length} · ${mins} min</span><button class="ghost small" id="endnow">Finish for now</button></div><div class="bar"><i style="width:${pct}%"></i></div>`;
+  app.innerHTML=head+`<div class="card" id="task" data-type="${t.type}"></div>`;
   app.querySelector('#endnow').onclick=()=>{s.i=s.tasks.length;render();};
-  TASKS[t.type](app.querySelector('#task'),t,()=>{s.i++;render();});
+  TASKS[t.type](app.querySelector('#task'),t,()=>{s.i++;render();window.scrollTo(0,0);});
 }
+// Skip / Show me helpers: send an item back to study and try it again later. Nothing is recorded.
+function backToStudy(t,studyTask,next){if(session){const s=session;const again=t.requeued?[]:[{...t,requeued:true,fresh:true,hint:true}];
+    s.tasks.splice(s.i+1,0,studyTask);s.tasks.push(...again);}
+  else if(studyTask){const el=app.querySelector('#task');if(el){TASKS[studyTask.type](el,studyTask,next);return;}}
+  next();}
+function tryLater(t){if(session&&!t.requeued)session.tasks.push({...t,requeued:true,hint:true});}
 function finishSession(){
   const s=session,ok=s.results.filter(r=>r.ok).length,n=s.results.length;
   bumpStreak();const changes=applyAdaptation();
   S.sessions.push({t:NOW(),n,ok,mins:Math.round((NOW()-s.start)/6e4)});S.sessions=S.sessions.slice(-120);save();
   const msg=n&&ok/n<0.7?ENCOURAGE[rnd(ENCOURAGE.length)]:PRAISE[rnd(PRAISE.length)];
-  app.innerHTML=`<div class="card"><h2>Session complete 🔥 ${S.streak.count}</h2><p class="mid">${ok} / ${n} recalled</p><div class="msg">${esc(msg)}</div>
+  app.innerHTML=`<div class="card"><h2>All done for now 🔥 ${S.streak.count}</h2><p class="mid">${n?ok+' of '+n+' remembered':'Nice — you studied something new today.'}</p><div class="msg">${esc(msg)}</div>
   ${changes.length?'<h3>What changed</h3><ul class="clean">'+changes.map(c=>`<li><b>${SKILLS[c.k]}</b><br><span class="mut">${esc(c.t)}</span></li>`).join('')+'</ul>':''}
-  ${s.notes.length?'<h3>Today’s plan was tuned because…</h3><ul class="clean">'+s.notes.map(x=>`<li class="mut">${esc(x)}</li>`).join('')+'</ul>':''}
-  <div class="row"><button id="done">Back to Today</button><button class="sec" data-go="progress">See progress</button></div></div>`;
+  ${s.notes.length?'<h3>Why today looked like this</h3><ul class="clean">'+s.notes.map(x=>`<li class="mut">${esc(x)}</li>`).join('')+'</ul>':''}
+  <p class="mut">Session complete. Come back tomorrow — the app will bring things back just before you’d forget them.</p>
+  <button class="xl" id="done">Back to Today</button><button class="xl sec" data-go="progress">See progress</button></div>`;
   session=null;app.querySelector('#done').onclick=()=>go('today');bindGo();nav();
 }
 function timer(){const t0=NOW();return ()=>NOW()-t0;}
-function gradeButtons(el,cb){const g=document.createElement('div');g.className='grades';
-  g.innerHTML='<button class="g1" data-q="1">Again</button><button class="g3" data-q="3">Hard</button><button class="g4" data-q="4">Good</button><button class="g5" data-q="5">Easy</button>';
+function gradeButtons(el,cb){const g=document.createElement('div');
+  g.innerHTML='<p class="prompt">How well did you remember it? Tap one:</p><div class="grades"><button class="g1" data-q="1">Again<br><small>forgot</small></button><button class="g3" data-q="3">Hard<br><small>slow</small></button><button class="g4" data-q="4">Good<br><small>got it</small></button><button class="g5" data-q="5">Easy<br><small>instant</small></button></div>';
   g.onclick=e=>{const b=e.target.closest('button');if(b)cb(+b.dataset.q);};el.appendChild(g);}
-function result(skill,ok,ms){record(skill,ok,ms);if(session)session.results.push({skill,ok});save();}
-function feedback(el,ok,text,next){const d=document.createElement('div');d.innerHTML=`<p class="mid ${ok?'ok':'bad'}">${ok?'✓':'✗'} ${text}</p><button>Next</button>`;el.appendChild(d);d.querySelector('button').onclick=next;d.querySelector('button').focus();}
+function result(skill,ok,ms){if(skill)record(skill,ok,ms);if(session)session.results.push({skill,ok});save();}
+function feedback(el,ok,text,next){const d=document.createElement('div');d.innerHTML=`<p class="mid ${ok?'ok':'bad'}">${ok?'✓ Yes!':'✗ Not quite'} ${text}</p><button class="xl" id="nx">Next</button>`;el.appendChild(d);d.querySelector('#nx').onclick=next;d.querySelector('#nx').focus();}
+// shared quiz footer: hint / show me / skip — always visible
+function helpers(hint){return `<div class="qa">${hint?'<button class="sec" id="qh">💡 Hint</button>':''}<button class="sec" id="qs">👀 Show me</button></div><button class="ghost" id="qk" style="margin-top:6px">↩︎ Skip — I haven’t learned this</button><p class="mut hide" id="qht"></p>`;}
+function bindHelpers(el,{hint,show,skip}){const h=el.querySelector('#qh');if(h)h.onclick=()=>{const p=el.querySelector('#qht');p.innerHTML='💡 '+esc(hint);p.classList.remove('hide');};
+  el.querySelector('#qs').onclick=show;el.querySelector('#qk').onclick=skip;}
+function hideHelpers(el){['#qh','#qs','#qk'].forEach(s=>{const b=el.querySelector(s);if(b)b.remove();});}
+function soundsOf(n){return n.split('').map(d=>d+' = '+MAJOR_KEY[d][1]).join(' · ');}
+function shownMsg(el,text,next){const d=document.createElement('div');d.innerHTML=`<p class="mid">👀 ${text}</p><p class="mut">No problem — it’ll come back later in this practice.</p><button class="xl" id="nx">Next</button>`;el.appendChild(d);d.querySelector('#nx').onclick=next;}
+function numStudy(nums){return {type:'studyNums',nums:[].concat(nums)};}
 
 const TASKS={
- msg(el,t,next){el.innerHTML=`<div class="msg">${esc(t.text)}</div><button>Let’s go</button>`;el.querySelector('button').onclick=next;},
- example(el,t,next){const l=lessonById(t.lesson);el.innerHTML=`<h3>Quick refresher: ${esc(l.title)}</h3><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div><button>Got it</button>`;el.querySelector('button').onclick=next;},
- lesson(el,t,next){const l=lessonById(t.lesson);el.innerHTML=`<p class="pill">New lesson</p><h3>${esc(l.title)}</h3><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div><button>Mark as learned</button>`;
-  el.querySelector('button').onclick=()=>{S.lessonsDone[l.id]=NOW();save();next();};},
- learnNums(el,t,next){el.innerHTML=`<h3>New number images</h3><p class="mut">Picture each one for a few seconds. They join your review deck.</p><table>${t.nums.map(n=>`<tr><td><b>${n}</b></td><td>${esc(S.major[n])}</td><td class="mut">${esc(n.split('').map(d=>MAJOR_KEY[d][1].split(',')[0]).join(' + '))}</td></tr>`).join('')}</table><button>Add to my deck</button>`;
-  el.querySelector('button').onclick=()=>{t.nums.forEach(n=>S.cards.push(newCard('numbers',n,S.major[n])));save();next();};},
- review(el,t,next){const c=S.cards.find(x=>x.id===t.id);if(!c)return next();const p=params(c.deck in SKILLS?c.deck:'numbers'),el2=timer();
-  const lvl=(S.skills[c.deck]||{}).level||1;
-  const reverse=c.deck==='names'&&lvl>=4&&p.mult>=1&&Math.random()<0.5;
-  let front;
-  if(c.deck==='names'){const x=c.extra;front=reverse?`<p class="mid">${esc(c.back)}</p><p class="mut">Where did you meet, and what stands out about them?</p>`:
-    `${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="mid">${esc(x.feature||'')}</p><p class="mut">${lvl>=3?'Name? And where did you meet?':'Met: '+esc(x.where||'')+' — name?'}</p>`;}
-  else if(c.deck==='numbers')front=`<p class="mut">Number → image</p><p class="big">${esc(c.front)}</p>`;
-  else front=`<p class="mid">${esc(c.front)}</p>`;
-  const hint=(p.hint||lvl===1)&&(c.hint||c.extra.hook)?`<button class="ghost" id="hint">Show hint</button><p class="mut hide" id="hintt">${esc(c.hint||c.extra.hook)}</p>`:'';
-  el.innerHTML=`<p class="pill">${esc(SKILLS[c.deck]||'Card')}</p>${front}${hint}<input id="ans" placeholder="Type it (optional)" autocomplete="off"><div class="row" style="margin-top:8px"><button id="show">Show answer</button></div><div id="back"></div>`;
-  const h=el.querySelector('#hint');if(h)h.onclick=()=>el.querySelector('#hintt').classList.remove('hide');
-  const show=()=>{const ms=el2(),typed=el.querySelector('#ans').value;let match='';
-    if(typed){const ok=c.deck==='numbers'?majorOk(c.front,typed):norm(typed)===norm(reverse?c.extra.where:c.back)||norm(c.back).split(' ').includes(norm(typed));match=`<p class="${ok?'ok':'bad'}">${ok?'Match ✓':'Not an exact match — grade yourself honestly.'}</p>`;}
-    const x=c.extra||{};
-    el.querySelector('#back').innerHTML=`<hr><p class="mid">${esc(reverse?(x.feature||'')+' · '+(x.where||''):c.back)}</p>${c.deck==='names'?`<p class="mut">${esc(x.where||'')}${x.hook?' · Hook: '+esc(x.hook):''}</p>`:''}${match}`;
-    el.querySelector('#show').remove();
-    gradeButtons(el.querySelector('#back'),q=>{sm2(c,q,p.mult);result(c.deck in SKILLS?c.deck:'numbers',q>=3,ms);next();});};
-  el.querySelector('#show').onclick=show;el.querySelector('#ans').onkeydown=e=>{if(e.key==='Enter')show();};},
- num(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">${t.warm?'Warm-up':t.win?'Quick win':'Major system'}</p><p class="mut">Type a word for</p><p class="big">${t.n}</p>${t.hint?`<p class="mut">Sounds: ${t.n.split('').map(d=>d+' = '+MAJOR_KEY[d][1]).join(' · ')}</p>`:''}<input id="a" autocomplete="off" autocapitalize="none"><button id="c" style="margin-top:8px">Check</button>`;
-  const go_=()=>{const a=el.querySelector('#a').value,ok=majorOk(t.n,a);result('numbers',ok,el2());el.querySelector('#c').remove();feedback(el,ok,ok?(norm(a)===norm(S.major[t.n])?'':'Valid — your list says “'+esc(S.major[t.n])+'”'):'Your list: '+esc(S.major[t.n]),next);};
-  el.querySelector('#c').onclick=go_;el.querySelector('#a').onkeydown=e=>{if(e.key==='Enter')go_();};el.querySelector('#a').focus();},
- wordnum(el,t,next){const el2=timer(),opts=shuffle([t.n,...shuffle([...Array(100).keys()].map(pad2).filter(x=>x!==t.n)).slice(0,3)]);
-  el.innerHTML=`<p class="pill">Major system · reverse</p><p class="mut">Which number is</p><p class="big">${esc(S.major[t.n])}</p><div class="grades">${opts.map(o=>`<button class="sec" data-o="${o}">${o}</button>`).join('')}</div>`;
-  el.querySelector('.grades').onclick=e=>{const b=e.target.closest('button');if(!b)return;const ok=b.dataset.o===t.n;result('numbers',ok,el2());el.querySelector('.grades').remove();feedback(el,ok,ok?'':'It was '+t.n,next);};},
- num4(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">Major system · 4 digits · on the clock</p><p class="big">${t.a}${t.b}</p><p class="mut">Two words, one scene. Type both, separated by a space.</p><input id="a" autocomplete="off" autocapitalize="none"><button id="c" style="margin-top:8px">Check</button>`;
-  const go_=()=>{const w=el.querySelector('#a').value.trim().split(/\s+/),ms=el2(),ok=w.length>=2&&majorOk(t.a,w[0])&&majorOk(t.b,w[1])&&ms<20000;result('numbers',ok,ms);el.querySelector('#c').remove();feedback(el,ok,(ok?'':'Your list: ')+esc(S.major[t.a]+' + '+S.major[t.b])+(ms>=20000?' (over 20s)':''),next);};
-  el.querySelector('#c').onclick=go_;el.querySelector('#a').onkeydown=e=>{if(e.key==='Enter')go_();};},
+ msg(el,t,next){el.innerHTML=`<div class="msg" style="font-size:17px">${esc(t.text)}</div><button class="xl" id="go">${esc(t.btn||'Let’s go')}</button>`;el.querySelector('#go').onclick=next;},
+ example(el,t,next){const l=lessonById(t.lesson);el.innerHTML=`<p class="pill">Quick refresher</p><h3>${esc(l.title)}</h3><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div><button class="xl" id="go">Got it</button>`;el.querySelector('#go').onclick=next;},
+ lesson(el,t,next){const l=lessonById(t.lesson);el.innerHTML=`<p class="pill">Learn · new lesson</p><h3>${esc(l.title)}</h3><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div><button class="xl" id="go">Got it</button>`;
+  el.querySelector('#go').onclick=()=>{S.lessonsDone[l.id]=NOW();save();next();};},
+ study(el,t,next){const c=S.cards.find(x=>x.id===t.id);if(!c)return next();const x=c.extra||{};let body='';
+  if(c.deck==='everyday')body=`<p class="mut">${esc(c.front)}</p><p class="big">${esc(c.back)}</p><div class="msg">🖼 <b>Picture it:</b> ${esc(c.hint)}</div><p class="mut">Close your eyes for 3–5 seconds and really <i>see</i> it — the sillier the better.</p>`;
+  else if(c.deck==='names')body=`${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="big">${esc(c.back)}</p><p class="mid">${esc(x.feature||'')}</p><p class="mut">${x.where?'Met: '+esc(x.where):''}</p>${x.hook?`<div class="msg">🖼 <b>Picture it:</b> ${esc(x.hook)}</div>`:''}<p class="mut">Say the name out loud, and picture the hook sitting on the feature you noticed.</p>`;
+  else if(c.deck==='numbers')body=`<p class="big">${esc(c.front)} = ${esc(c.back)}</p><p class="mut">${esc(soundsOf(c.front))}</p><p class="mut">Picture a ${esc(c.back)} for a few seconds.</p>`;
+  else body=`<p class="mid">${esc(c.front)}</p><p class="big" style="font-size:30px">${esc(c.back)}</p>${c.hint?`<div class="msg">🖼 <b>Picture it:</b> ${esc(c.hint)}</div>`:''}`;
+  el.innerHTML=`<p class="pill">Study · new</p><p class="prompt">Take a moment to learn this. You’ll be asked about it later.</p>${body}<button class="xl" id="go">Got it</button>`;
+  el.querySelector('#go').onclick=()=>{c.seen=true;c.studied=NOW();save();next();};},
+ studyLocus(el,t,next){const pal=S.palaces.find(p=>p.id===t.pid);const L=pal&&pal.loci[t.i];if(!L)return next();
+  el.innerHTML=`<p class="pill">Study · ${esc(pal.name)}</p><p class="prompt">Walk to this stop in your mind and see the picture there.</p><p class="mut">Stop ${t.i+1}</p><p class="mid">${esc(L.name)}</p><p class="big" style="font-size:30px">📌 ${esc(L.item)}</p>${L.image?`<div class="msg">🖼 <b>Picture it:</b> ${esc(L.image)}</div>`:''}<button class="xl" id="go">Got it</button>`;
+  el.querySelector('#go').onclick=()=>{L.seen=true;S.cards.forEach(c=>{if(c.extra&&c.extra.locus===L.id)c.seen=true;});save();next();};},
+ studyNums(el,t,next){el.innerHTML=`<p class="pill">Study · number pictures</p><p class="prompt">Each number has a picture-word. Look at each one and imagine it.</p><table>${t.nums.map(n=>`<tr><td><b>${n}</b></td><td style="font-size:18px">${esc(S.major[n])}</td><td class="mut">${esc(n.split('').map(d=>MAJOR_KEY[d][1].split(',')[0]).join(' + '))}</td></tr>`).join('')}</table><button class="xl" id="go">Got it</button>`;
+  el.querySelector('#go').onclick=()=>{t.nums.forEach(n=>{let c=S.cards.find(x=>x.deck==='numbers'&&x.front===n);if(!c){c=newCard('numbers',n,S.major[n]);S.cards.push(c);}c.seen=true;});save();next();};},
+ learnNums(el,t,next){el.innerHTML=`<p class="pill">Study · new number pictures</p><p class="prompt">Each number becomes a picture-word using the sounds from the lesson. Look at each one and imagine it for a few seconds.</p><table>${t.nums.map(n=>`<tr><td><b>${n}</b></td><td style="font-size:18px">${esc(S.major[n])}</td><td class="mut">${esc(n.split('').map(d=>MAJOR_KEY[d][1].split(',')[0]).join(' + '))}</td></tr>`).join('')}</table><p class="mut">You’ll be asked a few of these at the end of today’s practice.</p><button class="xl" id="go">Got it</button>`;
+  el.querySelector('#go').onclick=()=>{t.nums.forEach(n=>{let c=S.cards.find(x=>x.deck==='numbers'&&x.front===n);if(!c){c=newCard('numbers',n,S.major[n]);S.cards.push(c);}c.seen=true;});save();next();};},
+ review(el,t,next){const c=S.cards.find(x=>x.id===t.id);if(!c)return next();
+  if(!c.seen){return backToStudy(t,{type:'study',id:c.id},next);}
+  const sk=skillOf(c),p=sk?params(sk):MODE_PARAMS.steady,el2=timer(),lvl=sk?S.skills[sk].level:1,x=c.extra||{};
+  const reverse=c.deck==='names'&&lvl>=4&&p.mult>=1&&Math.random()<0.5&&!t.fresh;
+  let front,prompt;
+  if(c.deck==='names'){front=reverse?`<p class="big">${esc(c.back)}</p>`:`${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="mid">${esc(x.feature||'')}</p>${lvl<3&&x.where?`<p class="mut">Met: ${esc(x.where)}</p>`:''}`;
+    prompt=reverse?'Where did you meet this person? Type it in the box, then tap Check.':'What is this person’s name? Type it in the box, then tap Check.';}
+  else if(c.deck==='numbers'){front=`<p class="big">${esc(c.front)}</p>`;prompt='What picture-word goes with this number? Type it, then tap Check.';}
+  else if(c.deck==='everyday'){front=`<p class="mid">${esc(c.front)}</p>`;prompt='What was this item on your starter list? Type it, then tap Check.';}
+  else if(c.deck==='palace'){front=`<p class="mid">${esc(c.front)}</p>`;prompt='What did you place at this stop? Type it, then tap Check.';}
+  else {front=`<p class="mid">${esc(c.front)}</p>`;prompt='Type the answer in the box, then tap Check.';}
+  const hint=c.hint||x.hook||(c.deck==='numbers'?soundsOf(c.front):'')||('Starts with “'+String(c.back).charAt(0)+'”');
+  el.innerHTML=`<p class="pill">Remember · ${esc(SKILLS[c.deck]||(c.deck==='everyday'?'Starter list':'Card'))}</p>${front}<p class="prompt">${prompt}</p><input id="ans" placeholder="Type your answer here" autocomplete="off" autocapitalize="none"><button class="xl" id="c">Check</button>${helpers(hint)}<div id="back"></div>`;
+  let shown=false;
+  const reveal=(typed,viaShow)=>{if(shown)return;shown=true;const ms=el2();let match='';
+    if(typed){const ok=c.deck==='numbers'?majorOk(c.front,typed):norm(typed).replace(/s$/,'')===norm(reverse?x.where:c.back).replace(/s$/,'')||norm(c.back).split(' ').includes(norm(typed));match=`<p class="${ok?'ok':'bad'}">${ok?'✓ That matches.':'Not an exact match — decide honestly how close you were.'}</p>`;}
+    el.querySelector('#c').remove();hideHelpers(el);
+    el.querySelector('#back').innerHTML=`<hr><p class="mut">Answer:</p><p class="mid">${esc(reverse?(x.feature||'')+' · '+(x.where||''):c.back)}</p>${c.deck==='names'?`<p class="mut">${esc(x.where||'')}${x.hook?' · Hook: '+esc(x.hook):''}</p>`:''}${match}`;
+    if(viaShow){tryLater(t);const d=document.createElement('div');d.innerHTML='<p class="mut">No problem — have a good look. It’ll come back later in this practice.</p><button class="xl" id="nx">Next</button>';el.querySelector('#back').appendChild(d);d.querySelector('#nx').onclick=next;return;}
+    gradeButtons(el.querySelector('#back'),q=>{sm2(c,q,p.mult);result(sk,q>=3,ms);next();});};
+  el.querySelector('#c').onclick=()=>reveal(el.querySelector('#ans').value,false);el.querySelector('#ans').onkeydown=e=>{if(e.key==='Enter')reveal(e.target.value,false);};
+  bindHelpers(el,{hint,show:()=>reveal('',true),skip:()=>{c.seen=false;save();backToStudy(t,{type:'study',id:c.id},next);}});},
+ num(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">${t.warm?'Easy start':t.win?'Quick win':'Number practice'}</p><p class="big">${t.n}</p>${t.hint?`<p class="mut">Sounds: ${soundsOf(t.n)}</p>`:''}<p class="prompt">What’s the picture-word for this number? Type it in the box, then tap Check.</p><input id="a" placeholder="e.g. a word from your number list" autocomplete="off" autocapitalize="none"><button class="xl" id="c">Check</button>${helpers(soundsOf(t.n))}`;
+  const go_=()=>{const a=el.querySelector('#a').value,ok=majorOk(t.n,a);result('numbers',ok,el2());el.querySelector('#c').remove();hideHelpers(el);feedback(el,ok,ok?(norm(a)===norm(S.major[t.n])?'':'That works — your list says “'+esc(S.major[t.n])+'”'):'The picture-word is “'+esc(S.major[t.n])+'”',next);};
+  el.querySelector('#c').onclick=go_;el.querySelector('#a').onkeydown=e=>{if(e.key==='Enter')go_();};
+  bindHelpers(el,{hint:soundsOf(t.n),show:()=>{hideHelpers(el);el.querySelector('#c').remove();tryLater(t);shownMsg(el,''+t.n+' is “'+esc(S.major[t.n])+'”',next);},skip:()=>backToStudy(t,numStudy(t.n),next)});},
+ wordnum(el,t,next){const el2=timer(),opts=shuffle([t.n,...shuffle(learnedNums().length>=4?learnedNums().filter(x=>x!==t.n):[...Array(100).keys()].map(pad2).filter(x=>x!==t.n)).slice(0,3)]);
+  el.innerHTML=`<p class="pill">Number practice · reverse</p><p class="big">${esc(S.major[t.n])}</p><p class="prompt">Which number does this picture-word stand for? Tap one.</p><div class="grades opts">${opts.map(o=>`<button class="sec" data-o="${o}">${o}</button>`).join('')}</div>${helpers(S.major[t.n].split('').filter(ch=>!'aeiouwhy'.includes(ch)).join(' ')+' → use the sound key')}`;
+  el.querySelector('.opts').onclick=e=>{const b=e.target.closest('button');if(!b)return;const ok=b.dataset.o===t.n;result('numbers',ok,el2());el.querySelector('.opts').remove();hideHelpers(el);feedback(el,ok,ok?'':'It was '+t.n,next);};
+  bindHelpers(el,{hint:soundsOf(t.n),show:()=>{el.querySelector('.opts').remove();hideHelpers(el);tryLater(t);shownMsg(el,'“'+esc(S.major[t.n])+'” is '+t.n+'',next);},skip:()=>backToStudy(t,numStudy(t.n),next)});},
+ num4(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">Number practice · 4 digits · against the clock</p><p class="big">${t.a}${t.b}</p><p class="prompt">Type the two picture-words (one for each pair), with a space between them, then tap Check. Try to answer within 20 seconds.</p><input id="a" placeholder="word word" autocomplete="off" autocapitalize="none"><button class="xl" id="c">Check</button>${helpers(t.a+': '+soundsOf(t.a)+' / '+t.b+': '+soundsOf(t.b))}`;
+  const go_=()=>{const w=el.querySelector('#a').value.trim().split(/\s+/),ms=el2(),ok=w.length>=2&&majorOk(t.a,w[0])&&majorOk(t.b,w[1])&&ms<20000;result('numbers',ok,ms);el.querySelector('#c').remove();hideHelpers(el);feedback(el,ok,(ok?'':'Your list: ')+esc(S.major[t.a]+' + '+S.major[t.b])+(ms>=20000?' (over 20s)':''),next);};
+  el.querySelector('#c').onclick=go_;el.querySelector('#a').onkeydown=e=>{if(e.key==='Enter')go_();};
+  bindHelpers(el,{hint:'',show:()=>{el.querySelector('#c').remove();hideHelpers(el);tryLater(t);shownMsg(el,''+esc(S.major[t.a]+' + '+S.major[t.b])+'',next);},skip:()=>backToStudy(t,numStudy([t.a,t.b]),next)});},
  date(el,t,next){const el2=timer(),ch=dateToChunks(t.date,t.parts.includes('Hour')?t.time:'').filter(c=>t.parts.includes(c.label));
   const [y,m,d]=t.date.split('-');const shown=`${d}/${m}${t.parts.includes('Year')?'/'+y:''}${t.parts.includes('Hour')?' at '+t.time:''}`;
-  el.innerHTML=`<p class="pill">${t.win?'Quick win':'Dates & times'}</p><p class="big" style="font-size:32px">${shown}</p><p class="mut">Type the word for: ${ch.map(c=>c.label.toLowerCase()).join(', ')}</p>${ch.map((c,i)=>`<label>${c.label} (${c.c})${t.hint?' — '+esc(c.c.split('').map(x=>MAJOR_KEY[x][1].split(',')[0]).join('+')):''}</label><input data-i="${i}" autocomplete="off" autocapitalize="none">`).join('')}<button id="c" style="margin-top:8px">Check</button>`;
+  el.innerHTML=`<p class="pill">${t.win?'Quick win':'Dates & times'}</p><p class="big" style="font-size:32px">${shown}</p><p class="prompt">Type the picture-word for each part below (from your number list), then tap Check.</p>${ch.map((c,i)=>`<label>${c.label} = ${c.c}${t.hint?' — sounds: '+esc(c.c.split('').map(x=>MAJOR_KEY[x][1].split(',')[0]).join('+')):''}</label><input data-i="${i}" placeholder="picture-word for ${c.c}" autocomplete="off" autocapitalize="none">`).join('')}<button class="xl" id="c">Check</button>${helpers(ch.map(c=>c.c+': '+soundsOf(c.c)).join(' / '))}`;
   el.querySelector('#c').onclick=()=>{const ms=el2();let all=true;const res=ch.map((c,i)=>{const v=el.querySelector(`[data-i="${i}"]`).value,ok=majorOk(c.c,v);all=all&&ok;return `${c.label}: ${ok?'✓':'✗ '+esc(c.w)}`;});
-   if(t.timed&&ms>30000)all=false;result('dates',all,ms);el.querySelector('#c').remove();feedback(el,all,res.join(' · '),next);};},
- locus(el,t,next){const pal=S.palaces.find(p=>p.id===t.pid);const L=pal&&pal.loci[t.i];if(!L)return next();const el2=timer();
-  el.innerHTML=`<p class="pill">Palace walk · ${esc(pal.name)}</p><p class="mut">Stop ${t.i+1}</p><p class="mid">${esc(L.name)}</p><p class="mut">What did you place here?</p>${t.hint&&L.image?`<button class="ghost" id="h">Hint</button><p class="mut hide" id="ht">${esc(L.image)}</p>`:''}<button id="s">Reveal</button><div id="b"></div>`;
-  const h=el.querySelector('#h');if(h)h.onclick=()=>el.querySelector('#ht').classList.remove('hide');
-  el.querySelector('#s').onclick=()=>{const ms=el2();el.querySelector('#s').remove();el.querySelector('#b').innerHTML=`<p class="mid">${esc(L.item)}</p><p class="mut">${esc(L.image||'')}</p>`;
-   gradeButtons(el.querySelector('#b'),q=>{result('palace',q>=3,ms);const c=S.cards.find(x=>x.extra&&x.extra.locus===L.id);if(c)sm2(c,q,params('palace').mult);save();next();});};}
+   if(t.timed&&ms>30000)all=false;result('dates',all,ms);el.querySelector('#c').remove();hideHelpers(el);feedback(el,all,res.join(' · '),next);};
+  bindHelpers(el,{hint:'',show:()=>{el.querySelector('#c').remove();hideHelpers(el);tryLater(t);shownMsg(el,''+ch.map(c=>c.label+' '+c.c+' = '+esc(c.w)).join(' · ')+'',next);},skip:()=>backToStudy(t,numStudy(ch.map(c=>c.c)),next)});},
+ locus(el,t,next){const pal=S.palaces.find(p=>p.id===t.pid);const L=pal&&pal.loci[t.i];if(!L)return next();
+  if(!L.seen)return backToStudy(t,{type:'studyLocus',pid:t.pid,i:t.i},next);
+  const el2=timer();
+  el.innerHTML=`<p class="pill">Remember · ${esc(pal.name)}</p><p class="mut">Stop ${t.i+1}</p><p class="mid">${esc(L.name)}</p><p class="prompt">Walk to this stop in your mind. What did you put here? Type it, then tap Check.</p><input id="ans" placeholder="Type the item here" autocomplete="off" autocapitalize="none"><button class="xl" id="c">Check</button>${helpers(L.image||('Starts with “'+L.item.charAt(0)+'”'))}<div id="b"></div>`;
+  let shown=false;const reveal=viaShow=>{if(shown)return;shown=true;const ms=el2(),typed=el.querySelector('#ans').value;el.querySelector('#c').remove();hideHelpers(el);
+   const m=typed?(norm(typed)===norm(L.item)||norm(L.item).split(' ').includes(norm(typed))):null;
+   el.querySelector('#b').innerHTML=`<hr><p class="mut">Answer:</p><p class="mid">${esc(L.item)}</p><p class="mut">${esc(L.image||'')}</p>${m===null?'':`<p class="${m?'ok':'bad'}">${m?'✓ That matches.':'Not an exact match — decide honestly how close you were.'}</p>`}`;
+   if(viaShow){tryLater(t);const d=document.createElement('div');d.innerHTML='<p class="mut">No problem — it’ll come back later in this practice.</p><button class="xl" id="nx">Next</button>';el.querySelector('#b').appendChild(d);d.querySelector('#nx').onclick=next;return;}
+   gradeButtons(el.querySelector('#b'),q=>{result('palace',q>=3,ms);const c=S.cards.find(x=>x.extra&&x.extra.locus===L.id);if(c)sm2(c,q,params('palace').mult);save();next();});};
+  el.querySelector('#c').onclick=()=>reveal(false);el.querySelector('#ans').onkeydown=e=>{if(e.key==='Enter')reveal(false);};
+  bindHelpers(el,{hint:L.image||('Starts with “'+L.item.charAt(0)+'”'),show:()=>reveal(true),skip:()=>{L.seen=false;save();backToStudy(t,{type:'studyLocus',pid:t.pid,i:t.i},next);}});},
+ listRecall(el,t,next){const cs=t.ids.map(id=>S.cards.find(c=>c.id===id)).filter(Boolean);if(!cs.length)return next();
+  if(cs.some(c=>!c.seen)&&session){session.tasks.splice(session.i+1,0,...cs.filter(c=>!c.seen).map(c=>({type:'study',id:c.id})));if(!t.requeued)session.tasks.push({...t,requeued:true});return next();}
+  const el2=timer();
+  el.innerHTML=`<p class="pill">Remember · starter list</p><p class="prompt">Type the ${cs.length} things from your list — one in each box, in any order. Then tap Check.</p>${cs.map((c,i)=>`<label>Thing ${i+1}</label><input data-i="${i}" placeholder="Type thing ${i+1}" autocomplete="off" autocapitalize="none">`).join('')}<button class="xl" id="c">Check</button>${helpers('First letters: '+cs.map(c=>c.back.charAt(0)).join(', '))}<div id="b"></div>`;
+  const nm=s=>norm(s).replace(/s$/,'');
+  el.querySelector('#c').onclick=()=>{const ms=el2(),typed=[...el.querySelectorAll('input')].map(i=>nm(i.value)).filter(Boolean);let got=0;
+    const rows=cs.map(c=>{const ok=typed.includes(nm(c.back));if(ok)got++;sm2(c,ok?4:1,1);c.seen=true;if(session)session.results.push({skill:null,ok});return `<li>${ok?'✓':'✗'} <b>${esc(c.back)}</b> <span class="mut">— ${esc(c.hint)}</span></li>`;});
+    S.starterDone=true;save();el.querySelector('#c').remove();hideHelpers(el);
+    el.querySelector('#b').innerHTML=`<p class="mid ${got>=3?'ok':''}">You remembered ${got} of ${cs.length}! ${got>=4?'🎉':''}</p><ul class="clean">${rows.join('')}</ul><p class="mut">${got===cs.length?'That’s the power of vivid pictures.':'Any you missed come back tomorrow — that’s how the app works.'}</p><button class="xl" id="nx">Next</button>`;
+    el.querySelector('#nx').onclick=next;};
+  bindHelpers(el,{hint:'First letters: '+cs.map(c=>c.back.charAt(0)).join(', '),
+    show:()=>{el.querySelector('#c').remove();hideHelpers(el);tryLater(t);el.querySelector('#b').innerHTML=`<ul class="clean">${cs.map(c=>`<li><b>${esc(c.back)}</b> <span class="mut">— ${esc(c.hint)}</span></li>`).join('')}</ul><p class="mut">Have a good look. We’ll try again in a moment.</p><button class="xl" id="nx">Next</button>`;el.querySelector('#nx').onclick=next;},
+    skip:()=>{cs.forEach(c=>c.seen=false);save();if(session){session.tasks.splice(session.i+1,0,...cs.map(c=>({type:'study',id:c.id})));if(!t.requeued)session.tasks.push({...t,requeued:true});}next();}});}
 };
 
 /* ---------- Learn ---------- */
 VIEWS.learn=function(){
-  if(ui.lesson){const l=lessonById(ui.lesson);app.innerHTML=`<button class="ghost" id="bk">← Lessons</button><div class="card"><h2>${esc(l.title)}</h2><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div>
-   <div class="row"><button id="done">${S.lessonsDone[l.id]?'Learned ✓':'Mark as learned'}</button>${l.practice?`<button class="sec" data-go="${l.practice==='review'?'today':l.practice}">Practise</button>`:''}</div></div>`;
-   app.querySelector('#bk').onclick=()=>{ui={};render();};app.querySelector('#done').onclick=()=>{S.lessonsDone[l.id]=NOW();save();render();};bindGo();return;}
-  app.innerHTML=`<h2>Lessons</h2><p class="mut">Short how-tos with a worked example. The daily session introduces the next one when you’re doing well.</p>`+LESSONS.map(l=>`<div class="card row"><div class="grow"><b>${esc(l.title)}</b></div>${S.lessonsDone[l.id]?'<span class="ok">✓</span>':''}<button class="small" data-l="${l.id}">Open</button></div>`).join('');
+  if(ui.lesson){const l=lessonById(ui.lesson);
+   const prac=l.practice==='starter'?'<button class="xl sec" id="pst">Try the 5-thing practice</button>':l.practice==='numbers'?'<button class="xl sec" id="pnm">Learn my first number pictures</button>':l.practice==='dates'?'<button class="xl sec" id="pdt">Try the date converter</button>':l.practice?`<button class="xl sec" data-go="${({review:'today',palace:'palaces'})[l.practice]||l.practice}">${{palace:'Build a palace',people:'Add a person',review:'Go to Today'}[l.practice]||'Practise'}</button>`:'';
+   app.innerHTML=`<button class="ghost" id="bk">← All lessons</button><div class="card"><h2>${esc(l.title)}</h2><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div>
+   <button class="xl" id="done">${S.lessonsDone[l.id]?'Learned ✓':'Got it — mark as learned'}</button>${prac}</div>`;
+   app.querySelector('#bk').onclick=()=>{ui={};render();};app.querySelector('#done').onclick=()=>{S.lessonsDone[l.id]=NOW();save();render();};
+   const ps=app.querySelector('#pst');if(ps)ps.onclick=()=>{S.lessonsDone[l.id]=S.lessonsDone[l.id]||NOW();save();startStarter(false);};
+   const pn=app.querySelector('#pnm');if(pn)pn.onclick=()=>{S.lessonsDone[l.id]=S.lessonsDone[l.id]||NOW();save();const nums=[];for(let i=0;i<100&&nums.length<5;i++){const k=pad2(i);if(!S.cards.some(c=>c.deck==='numbers'&&c.front===k))nums.push(k);}
+     startSession({mode:'steady',tasks:[{type:'learnNums',nums},{type:'msg',text:'Now let’s see which ones stuck.',btn:'Ready'},...shuffle(nums).slice(0,3).map(n=>({type:'num',n,hint:true,fresh:true}))]});};
+   const pd=app.querySelector('#pdt');if(pd)pd.onclick=()=>{tab='numbers';ui={sub:'dates'};render();};
+   bindGo();return;}
+  app.innerHTML=`<h2>Lessons</h2><p class="mut">Short how-tos, one trick each, in order. Start with Lesson 1. Today’s practice brings in the next lesson when you’re ready.</p>`+LESSONS.map((l,i)=>`<div class="card row"><div class="grow"><b>${esc(l.title)}</b>${!S.lessonsDone[l.id]&&LESSONS.slice(0,i).every(x=>S.lessonsDone[x.id])?'<br><span class="pill">up next</span>':''}</div>${S.lessonsDone[l.id]?'<span class="ok">✓</span>':''}<button data-l="${l.id}">Open</button></div>`).join('');
   app.querySelectorAll('[data-l]').forEach(b=>b.onclick=()=>{ui.lesson=b.dataset.l;render();});
+};
+
+/* ---------- Help ---------- */
+VIEWS.help=function(){
+  const sec=(t,steps,extra)=>`<div class="card"><h3>${t}</h3><ol>${steps.map(s=>`<li>${s}</li>`).join('')}</ol>${extra||''}</div>`;
+  app.innerHTML=`<h2>Help</h2><button class="xl" id="rt">Replay the welcome tour</button>
+  ${sec('Your daily practice (about 10 minutes)',['Open the app on the <b>Today</b> tab.','Tap <b>Start today’s practice</b>.','<b>Study</b> cards show you something new — look at it, picture it, tap <b>Got it</b>.','Later you’re asked to <b>remember</b> it. Type your answer and tap <b>Check</b>.','Stuck? Tap 💡 <b>Hint</b>, 👀 <b>Show me</b>, or ↩︎ <b>Skip — I haven’t learned this</b> (it shows you the study card again and never counts against you).'])}
+  ${sec('Adding a person after you meet them',['Go to the 🙂 <b>People</b> tab.','Type their <b>name</b>, <b>where you met</b>, and <b>one thing that stands out</b> (eyebrows, hair, glasses, voice).','Optional: add a <b>hook</b> — a silly picture from their name (Jane → a chain), and a photo.','Tap <b>Add person</b>. They’ll appear as a Study card in your next practice, then the app quizzes you on them.'])}
+  ${sec('Building a memory palace',['Go to 🏛 <b>Palaces</b>. Type a place you know well (your home is perfect) and tap <b>Create palace</b>.','Rename the 10 suggested stops to match the real route you’d walk (gate, front door, hall…).','Tap <b>Edit</b> on a stop, type the <b>item</b> you want to remember and a <b>vivid picture</b> linking it to that stop. Tap <b>Save</b>.','In your next practice you’ll study each stop first, then walk the route in your mind to recall them.'])}
+  ${sec('Turning dates, times and numbers into pictures',['First do <b>Lesson 6</b> (numbers) — it teaches the sound for each digit.','Go to # <b>Numbers</b> → <b>Converter</b>, type any number, and it shows the picture-word for each pair of digits.','For an appointment, open <b>Dates & times</b>: type what happens, pick the date and time. It suggests one funny scene to picture.','Tap <b>Add to review deck</b> and it will come up in your practice.'])}
+  ${sec('Rating your answers: Again / Hard / Good / Easy',['<b>Again</b> — you forgot. It comes back tomorrow.','<b>Hard</b> — you got it, but slowly. It comes back fairly soon.','<b>Good</b> — you got it. The gap before the next review gets longer.','<b>Easy</b> — instant. The gap gets much longer.'],'<p class="mut">Be honest — the app uses these to decide when to show things again and whether to go slower or faster.</p>')}
+  ${sec('Backing up',['Go to ⋯ <b>More</b>.','Tap <b>Export JSON</b>. A small file downloads to your phone.','Save it somewhere safe (Google Drive or email it to yourself). Do this weekly.','To restore on a new phone: <b>More</b> → <b>Import JSON</b> and pick that file.'],'<p class="mut">Your data lives only on this phone, so a backup is the only copy.</p>')}
+  <div class="card"><h3>Updates</h3><p>If you don’t see the new version, close and reopen the app.</p><p class="mut">Version ${APP_VERSION}</p></div>`;
+  app.querySelector('#rt').onclick=()=>{tour=0;render();window.scrollTo(0,0);};
 };
 
 /* ---------- Palaces ---------- */
@@ -377,17 +531,17 @@ VIEWS.palaces=function(){
    <ul class="clean">${p.loci.map((l,i)=>`<li><b>${i+1}. ${esc(l.name)}</b>${l.item?`<br>📌 ${esc(l.item)}<br><span class="mut">${esc(l.image||'')}</span>`:'<br><span class="mut">empty</span>'}<div class="row"><button class="ghost small" data-e="${i}">Edit</button><button class="ghost small" data-up="${i}">↑</button><button class="ghost small" data-del="${i}">Remove</button></div></li>`).join('')}</ul>
    <label>New stop</label><div class="row"><input id="ln" class="grow" placeholder="e.g. Crystal cabinet"><button id="add" class="small">Add</button></div></div>
    <div class="card" id="ed"></div>
-   <div class="card row"><button id="walk">Walk-through quiz</button><button class="sec" id="clr">Clear items</button><button class="sec" id="rm">Delete palace</button></div>`;
+   <div class="card row"><button id="walk">Practise this palace</button><button class="sec" id="clr">Clear items</button><button class="sec" id="rm">Delete palace</button></div>`;
    app.querySelector('#bk').onclick=()=>{ui={};render();};
    app.querySelector('#add').onclick=()=>{const v=app.querySelector('#ln').value.trim();if(v){p.loci.push({id:uid(),name:v,item:'',image:''});save();render();}};
    app.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const l=p.loci.splice(+b.dataset.del,1)[0];S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));save();render();});
    app.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{const i=+b.dataset.up;if(i>0){[p.loci[i-1],p.loci[i]]=[p.loci[i],p.loci[i-1]];save();render();}});
    app.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{const i=+b.dataset.e,l=p.loci[i],ed=app.querySelector('#ed');
      ed.innerHTML=`<h3>Stop ${i+1}: ${esc(l.name)}</h3><label>Item to remember</label><input id="it" value="${esc(l.item)}"><label>Vivid image linking item to this stop</label><textarea id="im">${esc(l.image)}</textarea><label><input type="checkbox" id="sr" style="width:auto" ${S.cards.some(c=>c.extra&&c.extra.locus===l.id)?'checked':''}> Add to spaced review</label><button id="sv">Save</button>`;
-     ed.querySelector('#sv').onclick=()=>{l.item=ed.querySelector('#it').value.trim();l.image=ed.querySelector('#im').value.trim();
+     ed.querySelector('#sv').onclick=()=>{const ni=ed.querySelector('#it').value.trim(),nim=ed.querySelector('#im').value.trim();if(ni!==l.item||nim!==l.image)l.seen=false;l.item=ni;l.image=nim;
        S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));
        if(ed.querySelector('#sr').checked&&l.item)S.cards.push(newCard('palace',`${p.name} — stop ${i+1}: ${l.name}`,l.item,{locus:l.id,hint:l.image}));save();render();};ed.scrollIntoView();});
-   app.querySelector('#walk').onclick=()=>{const tasks=p.loci.map((l,i)=>l.item?{type:'locus',pid:p.id,i}:null).filter(Boolean);if(!tasks.length)return alert('Attach some items first.');session={tasks,i:0,results:[],start:NOW(),notes:[],mode:'steady'};tab='today';render();};
+   app.querySelector('#walk').onclick=()=>{const used=p.loci.map((l,i)=>({l,i})).filter(x=>x.l.item);if(!used.length)return alert('Add an item to at least one stop first (tap Edit on a stop).');const st=used.filter(x=>!x.l.seen).map(x=>({type:'studyLocus',pid:p.id,i:x.i}));startSession({mode:'steady',tasks:[...st,...(st.length?[{type:'msg',text:'Now walk the route in your mind from the start.',btn:'Start the walk'}]:[]),...used.map(x=>({type:'locus',pid:p.id,i:x.i}))]});};
    app.querySelector('#clr').onclick=()=>{if(confirm('Clear all items (keep the stops)?')){p.loci.forEach(l=>{l.item='';l.image='';S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));});save();render();}};
    app.querySelector('#rm').onclick=()=>{if(confirm('Delete this palace?')){const ids=new Set(p.loci.map(l=>l.id));S.cards=S.cards.filter(c=>!(c.extra&&ids.has(c.extra.locus)));S.palaces=S.palaces.filter(x=>x!==p);save();ui={};render();}};
    return;}
@@ -427,7 +581,7 @@ VIEWS.people=function(){
 /* ---------- Numbers / dates ---------- */
 VIEWS.numbers=function(){
   const sub=ui.sub||'convert';
-  const tabs=`<div class="row">${[['convert','Converter'],['dates','Dates & times'],['drill','Free drill'],['list','My 00–99']].map(t=>`<button class="small ${sub===t[0]?'':'sec'}" data-sub="${t[0]}">${t[1]}</button>`).join('')}</div>`;
+  const tabs=`<div class="row">${[['convert','Converter'],['dates','Dates & times'],['drill','Practice'],['list','My number list']].map(t=>`<button class="small ${sub===t[0]?'':'sec'}" data-sub="${t[0]}">${t[1]}</button>`).join('')}</div>`;
   let body='';
   if(sub==='convert')body=`<div class="card"><h3>Number → images</h3><input id="nn" inputmode="numeric" placeholder="e.g. 0427 555 123"><div id="out"></div></div><div class="card"><h3>Key</h3><table>${MAJOR_KEY.map(k=>`<tr><td><b>${k[0]}</b></td><td>${k[1]}</td></tr>`).join('')}</table></div>`;
   if(sub==='dates')body=`<div class="card"><h3>Date / time → images</h3><label>What happens</label><input id="ev" placeholder="e.g. Dentist appointment"><label>Date</label><input type="date" id="dd"><label>Time (optional)</label><input type="time" id="tt"><div id="dout"></div><button id="dadd" style="margin-top:8px">Add to review deck</button></div>`;
@@ -440,7 +594,7 @@ VIEWS.numbers=function(){
     ['#dd','#tt','#ev'].forEach(s=>app.querySelector(s).oninput=upd);
     app.querySelector('#dadd').onclick=()=>{const ev=app.querySelector('#ev').value.trim(),d=app.querySelector('#dd').value,t=app.querySelector('#tt').value;if(!ev||!d)return alert('Add the event and a date.');
       const [y,m,dd]=d.split('-');const ch=dateToChunks(d,t);S.cards.push(newCard('dates',`When is: ${ev}?`,`${dd}/${m}/${y}${t?' at '+t:''}`,{hint:ch.map(c=>c.w).join(' + ')}));save();alert('Added.');};}
-  if(sub==='drill'){const run=()=>{const t=Math.random()<0.6?numberTask():dateTask();TASKS[t.type](app.querySelector('#task'),t,run);};run();}
+  if(sub==='drill'){const run=()=>{const t=(Math.random()<0.6?numberTask():dateTask())||numberTask();const el=app.querySelector('#task');if(!t){el.innerHTML='<h3>Nothing to drill yet</h3><p>You haven’t learned any number pictures yet. Do Lesson 6 first, then learn your first pictures.</p><button class="xl" id="gl">Go to Lesson 6</button>';el.querySelector('#gl').onclick=()=>{tab='learn';ui={lesson:'major'};render();};return;}TASKS[t.type](el,t,run);};run();}
   if(sub==='list')app.querySelector('#msv').onclick=()=>{const bad=[];app.querySelector('#ml').value.split('\n').forEach(line=>{const m=line.trim().match(/^(\d\d)\s+(.+)$/);if(m){S.major[m[1]]=m[2].trim();if(majorEncode(m[2])!==m[1])bad.push(m[1]+' '+m[2]);}});save();
     app.querySelector('#mlw').innerHTML=bad.length?'Saved. These may not follow the sounds (the checker is approximate, so silent letters can fool it): '+esc(bad.join(', ')):'Saved ✓';};
 };
@@ -448,7 +602,7 @@ VIEWS.numbers=function(){
 /* ---------- Progress ---------- */
 VIEWS.progress=function(){
   const rows=Object.keys(SKILLS).map(k=>{const p=profile(k);const arrow=p.n<12?'·':p.trend>0.05?'↑ improving':p.trend<-0.05?'↓ dipping':'→ steady';
-   return `<div class="card"><div class="row"><b class="grow">${SKILLS[k]}</b><span class="pill ${p.mode}">${p.mode}</span></div>
+   return `<div class="card"><div class="row"><b class="grow">${SKILLS[k]}</b><span class="pill ${p.mode}">pace: ${MODE_LABEL[p.mode]}</span></div>
    <div class="row mut"><span>Level ${p.level}/5</span><span>${p.acc==null?'no answers yet':Math.round(p.acc*100)+'% recent accuracy'}</span><span>${p.msRecent?(p.msRecent/1000).toFixed(1)+'s typical':''}</span><span>${arrow}</span></div>
    <div class="bar" style="margin:6px 0"><i style="width:${p.level*20}%"></i></div><p class="mut">Now: ${esc(levelDesc(k,p.level))}</p><p>${esc(p.why)}</p></div>`;}).join('');
   const due=dueCards().length,tot=S.cards.length,last7=S.sessions.filter(s=>NOW()-s.t<7*864e5);
@@ -458,7 +612,7 @@ VIEWS.progress=function(){
 
 /* ---------- More: backup, import, settings ---------- */
 VIEWS.more=function(){
-  app.innerHTML=`<h2>Backup & settings</h2>
+  app.innerHTML=`<h2>Backup & settings</h2><button class="xl sec" data-go="help">Help & instructions</button>
   <div class="card"><h3>Backup</h3><p class="mut">Everything lives only in this browser. Export weekly and keep the file in Dropbox/Drive.${S.lastBackup?' Last export: '+new Date(S.lastBackup).toLocaleDateString():''}</p><div class="row"><button id="ex">Export JSON</button><label class="btn sec" style="margin:0;color:var(--ink)">Import JSON<input type="file" id="im" accept=".json,application/json" class="hide"></label></div></div>
   <div class="card"><h3>Import cards from notes (e.g. Obsidian)</h3><p class="mut">One per line: <code>front :: back</code>. Start a line with <code>#names</code>, <code>#dates</code>, <code>#palace</code> or <code>#numbers</code> to set the deck for the lines after it. For #names use <code>Name :: where met :: feature :: hook</code>.</p><textarea id="tx"></textarea><button id="ti">Import lines</button></div>
   <div class="card"><h3>Settings</h3><label>Daily session length (minutes)</label><select id="mn">${[5,10,15,20].map(m=>`<option ${S.settings.minutes==m?'selected':''}>${m}</option>`).join('')}</select><button class="sec" id="rs" style="margin-top:12px">Reset everything</button></div>
@@ -468,6 +622,7 @@ VIEWS.more=function(){
   app.querySelector('#ti').onclick=()=>{const n=importLines(app.querySelector('#tx').value);save();alert(n+' cards imported.');};
   app.querySelector('#mn').onchange=e=>{S.settings.minutes=+e.target.value;save();};
   app.querySelector('#rs').onclick=()=>{if(confirm('Delete ALL data on this phone? Export first if unsure.')){S=freshState();save();go('today');}};
+  bindGo();
 };
 function importLines(txt){let deck='custom',n=0;txt.split('\n').forEach(line=>{line=line.trim();const tag=line.match(/^#(names|dates|palace|numbers|custom)\b/i);if(tag){deck=tag[1].toLowerCase();return;}
   const parts=line.split('::').map(s=>s.trim());if(parts.length<2||!parts[0])return;
@@ -475,9 +630,9 @@ function importLines(txt){let deck='custom',n=0;txt.split('\n').forEach(line=>{l
   else S.cards.push(newCard(deck==='custom'?'dates':deck,parts[0],parts[1]));n++;});return n;}
 
 /* ================= boot ================= */
-load();render();
-if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
-window.MT={get S(){return S;},set S(v){S=v;},freshState,profile,composeSession,applyAdaptation,sm2,majorEncode,majorOk,dateToChunks,numberToWords,record,params,overallMode,newCard,importLines,setNow:f=>{NOW=f;},today,TASKS,render,go,save,load};
+load();if(!S.onboarded)tour=0;render();
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').then(r=>r&&r.update&&r.update()).catch(()=>{});
+window.MT={get S(){return S;},set S(v){S=v;},freshState,profile,composeSession,applyAdaptation,sm2,majorEncode,majorOk,dateToChunks,numberToWords,record,params,overallMode,newCard,importLines,setNow:f=>{NOW=f;},today,TASKS,render,go,save,load,learnedNums,ensureStarter,startStarter,startLesson1,RECALL_TYPES,STUDY_TYPES,get tour(){return tour;},set tour(v){tour=v;},get session(){return session;},APP_VERSION};
 </script>
 </body>
 </html>
