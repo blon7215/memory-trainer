@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#3b2a6b">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Memory Trainer</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="icon.svg">
+<style>
+:root{--bg:#f6f4fb;--card:#fff;--ink:#1f1a2e;--mut:#6b6580;--pri:#5b3fc4;--pri2:#ece6ff;--ok:#1f8a4c;--bad:#c0392b;--warn:#b7791f;--r:14px}
+@media (prefers-color-scheme:dark){:root{--bg:#15121f;--card:#221d31;--ink:#eee9fa;--mut:#a59fb9;--pri:#9b84ff;--pri2:#2e2648}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);padding-bottom:76px}
+header{position:sticky;top:0;background:var(--pri);color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;z-index:5}
+header h1{font-size:18px;margin:0}
+.streak{font-size:14px;background:rgba(255,255,255,.18);padding:4px 10px;border-radius:99px}
+main{max-width:640px;margin:0 auto;padding:12px}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--pri2);z-index:5;padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;color:var(--mut);padding:8px 2px;font-size:11px}
+nav button b{display:block;font-size:20px;font-weight:400}
+nav button.on{color:var(--pri);font-weight:600}
+.card{background:var(--card);border-radius:var(--r);padding:14px;margin:10px 0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+h2{font-size:20px;margin:6px 0 10px}h3{font-size:16px;margin:4px 0 8px}
+.mut{color:var(--mut);font-size:14px}
+button,.btn{font:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--pri);color:#fff;cursor:pointer;min-height:44px}
+button.sec{background:var(--pri2);color:var(--ink)}
+button.ghost{background:none;color:var(--pri);padding:6px 8px;min-height:0}
+button.small{padding:6px 10px;min-height:34px;font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grow{flex:1}
+input,textarea,select{font:inherit;width:100%;padding:10px;border-radius:10px;border:1px solid #c9c2dd;background:var(--card);color:var(--ink)}
+textarea{min-height:90px}
+label{display:block;font-size:13px;color:var(--mut);margin:8px 0 3px}
+.big{font-size:40px;font-weight:700;text-align:center;margin:12px 0;letter-spacing:1px}
+.mid{font-size:22px;font-weight:600;text-align:center;margin:8px 0}
+.grades{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.grades button{padding:10px 4px;font-size:14px}
+.g1{background:var(--bad)}.g3{background:var(--warn)}.g4{background:var(--ok)}.g5{background:#2b6cb0}
+.bar{height:8px;background:var(--pri2);border-radius:9px;overflow:hidden}.bar i{display:block;height:100%;background:var(--pri)}
+.pill{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:var(--pri2);color:var(--ink)}
+.pill.support{background:#fde8d7;color:#8a4b12}.pill.stretch{background:#d9f3e3;color:#17663a}
+.msg{background:var(--pri2);border-radius:10px;padding:10px;margin:8px 0}
+.ok{color:var(--ok)}.bad{color:var(--bad)}
+ul.clean{list-style:none;padding:0;margin:0}ul.clean li{padding:8px 0;border-bottom:1px solid var(--pri2)}
+img.face{width:72px;height:72px;object-fit:cover;border-radius:12px}
+img.facebig{max-width:180px;max-height:180px;border-radius:14px;display:block;margin:8px auto}
+.hide{display:none}
+table{width:100%;border-collapse:collapse;font-size:14px}td{padding:4px;border-bottom:1px solid var(--pri2)}
+</style>
+</head>
+<body>
+<header><h1 id="ttl">Memory Trainer</h1><span class="streak" id="streak">🔥 0</span></header>
+<main id="app"></main>
+<nav id="nav"></nav>
+<script>
+"use strict";
+/* ================= Data & helpers ================= */
+const KEY='memtrainer.v1';
+const SKILLS={names:'Names & faces',palace:'Places & palaces',numbers:'Numbers (major system)',dates:'Dates & times'};
+const SKILL_LESSON={names:'names',palace:'palace',numbers:'major',dates:'dates'};
+const DEFAULT_MAJOR="sauce suit sun sumo sewer seal sash sock sofa soap toes toad tin tomb tire towel dish duck dove tub nose net nun gnome Nero nail notch neck knife knob mouse mat moon mummy mower mule match mug movie map rose rat rain ram rower roll roach rock roof rope lace lid lion lamb lure lily leash log lava lip cheese sheet chain jam chair jail judge chalk chef ship case cat coin comb car coal cage cake cave cub vase foot fan foam fire file fish fog fife fob bus bat bone bomb bear bell beach book beef baby".split(' ');
+const pad2=n=>String(n).padStart(2,'0');
+const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let NOW=()=>Date.now();
+function today(){const d=new Date(NOW());return Math.floor((d.getTime()-d.getTimezoneOffset()*6e4)/864e5);}
+function rnd(n){return Math.floor(Math.random()*n);}
+function shuffle(a){a=a.slice();for(let i=a.length-1;i>0;i--){const j=rnd(i+1);[a[i],a[j]]=[a[j],a[i]];}return a;}
+function median(a){if(!a.length)return 0;const s=a.slice().sort((x,y)=>x-y);const m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;}
+function norm(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9 ]/g,'').trim();}
+
+function freshState(){
+  const major={};DEFAULT_MAJOR.forEach((w,i)=>major[pad2(i)]=w);
+  const skills={};Object.keys(SKILLS).forEach(k=>skills[k]={level:1,log:[],sinceChange:0});
+  return {v:1,cards:[],palaces:[],major,skills,lessonsDone:{},streak:{count:0,best:0,last:null},
+    adaptLog:[],settings:{minutes:10},sessions:[],lastBackup:null,lastWarmupMsg:''};
+}
+let S;
+function load(){try{S=JSON.parse(localStorage.getItem(KEY))||freshState();}catch(e){S=freshState();}
+  const f=freshState();for(const k in f)if(S[k]===undefined)S[k]=f[k];
+  for(const k in SKILLS)if(!S.skills[k])S.skills[k]=f.skills[k];}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){alert('Storage is full. Export a backup and remove some photos.');}}
+
+/* ================= Major system ================= */
+const MAJOR_KEY=[['0','s, z, soft c'],['1','t, d, th'],['2','n'],['3','m'],['4','r'],['5','l'],['6','j, sh, ch, soft g'],['7','k, hard c, hard g, q'],['8','f, v, ph'],['9','p, b']];
+// approximate phonetic encoder: word -> digits (vowels, w, h, y ignored; double letters count once)
+function majorEncode(word){
+  let w=norm(word).replace(/ /g,''),out='',i=0,prev='';
+  const push=(d)=>{if(d!==prev)out+=d;prev=d;};
+  while(i<w.length){
+    const c=w[i],n=w[i+1]||'',t3=w.substr(i,3),t2=w.substr(i,2);
+    if(t3==='tch'){push('6');i+=3;continue;}
+    if(t2==='sh'||t2==='ch'){push('6');i+=2;continue;}
+    if(t2==='th'){push('1');i+=2;continue;}
+    if(t2==='ph'){push('8');i+=2;continue;}
+    if(t2==='ck'){push('7');i+=2;continue;}
+    if(t2==='gh'){prev='';i+=2;continue;}
+    if((t2==='kn'||t2==='gn')&&i===0){i+=1;continue;}
+    if(t2==='dg'){push('6');i+=2;continue;}
+    if(t2==='lk'&&w[i-1]==='a'){i+=1;continue;}
+    if(t2==='mb'&&i+2===w.length){push('3');i+=2;continue;}
+    const map={s:'0',z:'0',t:'1',d:'1',n:'2',m:'3',r:'4',l:'5',j:'6',k:'7',q:'7',f:'8',v:'8',p:'9',b:'9'};
+    if(c==='c'){push('eiy'.includes(n)?'0':'7');i++;continue;}
+    if(c==='g'){push('ei'.includes(n)&&i+1<w.length&&w.length>3?'6':'7');i++;continue;}
+    if(c==='x'){push('7');push('0');i++;continue;}
+    if(map[c]){push(map[c]);i++;continue;}
+    prev='';i++; // vowel / w / h / y separates
+  }
+  return out;
+}
+function majorOk(num,answer){const a=norm(answer);if(!a)return false;
+  const listed=norm(S.major[num]||'');if(a===listed)return true;
+  return majorEncode(a)===num;}
+function numberToWords(digits){digits=String(digits).replace(/\D/g,'');const chunks=[];
+  for(let i=0;i<digits.length;i+=2){let c=digits.substr(i,2);chunks.push(c.length===2?{c,w:S.major[c]}:{c,w:S.major['0'+c]+' (single '+c+': use 0'+c+')'});}
+  return chunks;}
+function dateToChunks(dstr,tstr){ // yyyy-mm-dd, hh:mm
+  const out=[];if(dstr){const [y,m,d]=dstr.split('-');out.push({label:'Day',c:d,w:S.major[d]},{label:'Month',c:m,w:S.major[m]},{label:'Year',c:y.slice(2),w:S.major[y.slice(2)]});
+    if(y.slice(0,2)!=='20')out.push({label:'Century',c:y.slice(0,2),w:S.major[y.slice(0,2)]});}
+  if(tstr){const [h,mi]=tstr.split(':');out.push({label:'Hour',c:h,w:S.major[h]},{label:'Minute',c:mi,w:S.major[mi]});}
+  return out;}
+
+/* ================= SM-2 with adaptive multiplier ================= */
+function newCard(deck,front,back,extra){return {id:uid(),deck,front,back,hint:(extra&&extra.hint)||'',extra:extra||{},ef:2.5,reps:0,ivl:0,due:today(),lapses:0,created:NOW()};}
+function sm2(card,q,mult){
+  mult=mult||1;
+  if(q<3){card.reps=0;card.ivl=1;card.lapses++;}
+  else{card.reps++;
+    if(card.reps===1)card.ivl=1;else if(card.reps===2)card.ivl=mult<1?3:6;else card.ivl=Math.round(card.ivl*card.ef);
+    card.ivl=Math.max(1,Math.round(card.ivl*mult));}
+  card.ef=Math.max(1.3,card.ef+0.1-(5-q)*(0.08+(5-q)*0.02));
+  card.due=today()+card.ivl;card.last=NOW();return card;}
+
+/* ================= Adaptive engine ================= */
+function record(skill,ok,ms){const sk=S.skills[skill];if(!sk)return;
+  sk.log.push({t:NOW(),ok:ok?1:0,ms:Math.round(ms||0)});if(sk.log.length>80)sk.log=sk.log.slice(-80);sk.sinceChange++;}
+function profile(skill){
+  const sk=S.skills[skill],L=sk.log,n=L.length,last20=L.slice(-20),r10=L.slice(-10),p10=L.slice(-20,-10);
+  const acc=a=>a.length?a.reduce((s,x)=>s+x.ok,0)/a.length:null;
+  const a20=acc(last20),ar=acc(r10),ap=acc(p10);
+  const msR=median(r10.map(x=>x.ms)),msP=median(p10.map(x=>x.ms));
+  const slowing=p10.length>=5&&msP>0&&msR>msP*1.3;
+  const speeding=p10.length>=5&&msP>0&&msR<msP*0.85;
+  let mode='steady',why='';
+  if(n<6){mode='steady';why='Still getting to know you here — a few more answers and I’ll start tuning.';}
+  else if(a20<0.7){mode='support';why=`Accuracy is ${Math.round(a20*100)}% (under 70%), so I’m slowing down: fewer new items, shorter gaps between reviews, hints and the worked example come back, and items are broken into smaller chunks.`;}
+  else if(slowing&&a20<0.85){mode='support';why=`Answers are taking longer than before (${(msR/1000).toFixed(1)}s vs ${(msP/1000).toFixed(1)}s), so I’m easing off and adding a warm-up.`;}
+  else if(a20>=0.85&&!slowing){mode='stretch';why=`Accuracy is ${Math.round(a20*100)}%${speeding?' and you’re getting faster':''}, so I’m stretching you: longer gaps between reviews, more new items and harder versions.`;}
+  else {mode='steady';why=`Accuracy is ${Math.round(a20*100)}% — a good learning zone, so the pace stays the same.`;}
+  const trend=(ar!=null&&ap!=null)?(ar-ap):0;
+  return {skill,n,acc:a20,accRecent:ar,trend,msRecent:msR,msPrior:msP,slowing,speeding,mode,why,level:sk.level};
+}
+const MODE_PARAMS={support:{mult:0.7,newItems:2,drillCount:3,hint:true,chunk:true},steady:{mult:1,newItems:5,drillCount:5,hint:false,chunk:false},stretch:{mult:1.2,newItems:8,drillCount:7,hint:false,chunk:false}};
+function params(skill){return MODE_PARAMS[profile(skill).mode];}
+function overallMode(){const ps=Object.keys(SKILLS).map(profile).filter(p=>p.n>=6);
+  if(!ps.length)return 'steady';const sup=ps.filter(p=>p.mode==='support').length,str=ps.filter(p=>p.mode==='stretch').length;
+  if(sup>ps.length/2)return 'support';if(str>=Math.ceil(ps.length/2)&&sup===0)return 'stretch';return 'steady';}
+function adaptLog(skill,text){S.adaptLog.unshift({t:NOW(),skill,text});S.adaptLog=S.adaptLog.slice(0,40);}
+// level changes, called at end of each session
+function applyAdaptation(){const changes=[];
+  for(const k in SKILLS){const sk=S.skills[k],p=profile(k);if(sk.sinceChange<10||p.n<10)continue;
+    if(p.acc>=0.9&&!p.slowing&&sk.level<5){sk.level++;sk.sinceChange=0;const t=`Levelled up to ${sk.level}: ${Math.round(p.acc*100)}% over your last ${Math.min(20,p.n)} answers. ${levelDesc(k,sk.level)}`;adaptLog(k,t);changes.push({k,t});}
+    else if(p.acc<0.6&&sk.level>1){sk.level--;sk.sinceChange=0;const t=`Eased back to level ${sk.level} so it feels manageable again (${Math.round(p.acc*100)}% recently). ${levelDesc(k,sk.level)}`;adaptLog(k,t);changes.push({k,t});}
+  }
+  return changes;}
+function levelDesc(k,l){return ({
+  numbers:['','Numbers 00–19.','Numbers 00–49.','Full 00–99.','00–99 both ways (word → number too).','4-digit numbers as two images, on the clock.'],
+  dates:['','Day of the month only.','Day + month.','Full date (day, month, year).','Full date plus a time.','Full date + time, on the clock.'],
+  names:['','Name from face/feature, with hook hints.','Name from face/feature.','Name plus where you met.','Both directions (name → face/feature too).','Both directions, on the clock.'],
+  palace:['','Walk the first 5 loci in order.','Walk up to 10 loci in order.','Whole palace in order.','Whole palace backwards.','Random loci, on the clock.']
+})[k][l]||'';}
+const ENCOURAGE=["Tricky ones are where the learning happens — that’s your brain doing the work.","Slower is fine. Accuracy first, speed comes by itself.","You’re rebuilding a skill, not taking a test. Let’s warm up with a few easy wins.","Every miss today is a card that comes back sooner — that’s the system working for you.","Short and steady beats long and stressful. Today is a lighter session."];
+const PRAISE=["Nice — you’re ready for a bit more.","That’s strong recall. Stretching you a little.","Your memory is getting faster. Keep the streak going!"];
+
+/* ================= Drill generators (level-aware) ================= */
+function numberTask(skill){const sk=S.skills.numbers,p=params('numbers');let lvl=sk.level;
+  const max=[0,20,50,100,100,100][lvl];
+  if(lvl>=5&&!p.chunk){const a=pad2(rnd(100)),b=pad2(rnd(100));return {type:'num4',a,b,timed:true};}
+  if(lvl>=4&&!p.chunk&&Math.random()<0.4){const n=pad2(rnd(100));return {type:'wordnum',n};}
+  return {type:'num',n:pad2(rnd(max)),hint:p.hint};}
+function dateTask(){const lvl=S.skills.dates.level,p=params('dates');
+  const d=new Date(2026,0,1+rnd(365*3));const y=d.getFullYear(),m=pad2(d.getMonth()+1),dd=pad2(d.getDate()),t=pad2(7+rnd(12))+':'+['00','15','30','45'][rnd(4)];
+  let parts=['Day'];if(lvl>=2)parts.push('Month');if(lvl>=3)parts.push('Year');if(lvl>=4)parts.push('Hour','Minute');
+  if(p.chunk&&parts.length>1)parts=parts.slice(0,Math.max(1,parts.length-2)); // smaller chunks when struggling
+  return {type:'date',date:`${y}-${m}-${dd}`,time:t,parts,hint:p.hint,timed:lvl>=5};}
+function palaceTasks(count){const pals=S.palaces.filter(p=>p.loci.some(l=>l.item));if(!pals.length)return [];
+  const lvl=S.skills.palace.level,p=params('palace');const pal=pals[rnd(pals.length)];
+  let loci=pal.loci.map((l,i)=>({l,i})).filter(x=>x.l.item);
+  const cap=p.chunk?Math.min(5,[0,5,10,99,99,99][lvl]):[0,5,10,99,99,99][lvl];loci=loci.slice(0,cap);
+  if(lvl===4&&!p.chunk)loci.reverse();if(lvl>=5&&!p.chunk)loci=shuffle(loci);
+  return loci.slice(0,Math.max(count,3)).map(x=>({type:'locus',pid:pal.id,i:x.i,hint:p.hint}));}
+
+/* ================= Session composer ================= */
+function dueCards(){const t=today();return S.cards.filter(c=>c.due<=t);}
+function composeSession(){
+  const om=overallMode(),budget={support:12,steady:18,stretch:24}[om];
+  const profs={};for(const k in SKILLS)profs[k]=profile(k);
+  const has={names:S.cards.some(c=>c.deck==='names'),palace:S.palaces.some(p=>p.loci.some(l=>l.item)),numbers:true,dates:true};
+  const tasks=[],notes=[];
+  // 1. warm-up for weak skills (easy wins first)
+  const weak=Object.values(profs).filter(p=>p.mode==='support'&&has[p.skill]);
+  if(weak.length){tasks.push({type:'msg',text:ENCOURAGE[rnd(ENCOURAGE.length)]});
+    for(const p of weak){const lid=SKILL_LESSON[p.skill];tasks.push({type:'example',lesson:lid});notes.push(`${SKILLS[p.skill]}: warm-up + worked example (${p.why.split(',')[0]}).`);}
+    for(let i=0;i<2;i++)tasks.push({type:'num',n:pad2(rnd(10)),hint:true,warm:true});}
+  // 2. due reviews, weak skills first, lowest ease first; capped
+  const weight=k=>profs[k].mode==='support'?0:profs[k].mode==='steady'?1:2;
+  const due=dueCards().sort((a,b)=>weight(a.deck)-weight(b.deck)||a.ef-b.ef);
+  const reviewCap=Math.round(budget*0.6);due.slice(0,reviewCap).forEach(c=>tasks.push({type:'review',id:c.id}));
+  if(due.length>reviewCap)notes.push(`${due.length-reviewCap} reviews held over to keep today to about ${S.settings.minutes} minutes.`);
+  // 3. new major-system pairs (amount depends on numbers mode)
+  const np=params('numbers').newItems,haveNums=new Set(S.cards.filter(c=>c.deck==='numbers').map(c=>c.front));
+  const newNums=[];for(let i=0;i<100&&newNums.length<np;i++){const k=pad2(i);if(!haveNums.has(k))newNums.push(k);}
+  if(newNums.length)tasks.push({type:'learnNums',nums:newNums});
+  // 4. drills weighted toward weak skills, keep at least one strong-skill win
+  const remaining=Math.max(4,budget-tasks.filter(t=>t.type!=='msg'&&t.type!=='example').length);
+  const ks=Object.keys(SKILLS).filter(k=>has[k]&&k!=='names');
+  const w=ks.map(k=>{const p=profs[k];return 0.5+(p.acc==null?0.5:(1-p.acc))*2+(p.mode==='support'?1:0);});
+  const tot=w.reduce((a,b)=>a+b,0);
+  ks.forEach((k,i)=>{let n=Math.max(1,Math.round(remaining*w[i]/tot));n=Math.min(n,params(k).drillCount+2);
+    for(let j=0;j<n;j++){if(k==='numbers')tasks.push(numberTask());else if(k==='dates')tasks.push(dateTask());}
+    if(k==='palace')palaceTasks(n).forEach(t=>tasks.push(t));});
+  // confidence win from strongest skill
+  const strong=Object.values(profs).filter(p=>p.n>=6&&has[p.skill]).sort((a,b)=>(b.acc||0)-(a.acc||0))[0];
+  if(strong&&strong.mode!=='support'){if(strong.skill==='numbers')tasks.push({type:'num',n:pad2(rnd(20)),win:true});
+    else if(strong.skill==='dates')tasks.push({...dateTask(),parts:['Day'],win:true});
+    else if(strong.skill==='palace'){const pt=palaceTasks(1)[0];if(pt)tasks.push({...pt,win:true});}
+    else if(strong.skill==='names'){const nc=S.cards.filter(c=>c.deck==='names'&&c.reps>0).sort((a,b)=>b.ef-a.ef)[0];if(nc&&!tasks.some(t=>t.id===nc.id))tasks.push({type:'review',id:nc.id,win:true});}}
+  // 5. next lesson when doing well (or first-time user)
+  const next=LESSONS.find(l=>!S.lessonsDone[l.id]);
+  if(next&&(om==='stretch'||Object.keys(S.lessonsDone).length<2))tasks.push({type:'lesson',lesson:next.id});
+  Object.values(profs).forEach(p=>{if(p.mode==='stretch'&&has[p.skill])notes.push(`${SKILLS[p.skill]}: stretch — ${PRAISE[rnd(PRAISE.length)]}`);});
+  // interleave middle section lightly (keep warm-up at front, lesson at end)
+  const head=tasks.filter(t=>t.warm||t.type==='msg'||t.type==='example'),tail=tasks.filter(t=>t.type==='lesson'),mid=tasks.filter(t=>!head.includes(t)&&!tail.includes(t));
+  const locus=mid.filter(t=>t.type==='locus'),other=shuffle(mid.filter(t=>t.type!=='locus'&&t.type!=='learnNums')),learn=mid.filter(t=>t.type==='learnNums');
+  return {mode:om,tasks:[...head,...learn,...other.slice(0,Math.ceil(other.length/2)),...locus,...other.slice(Math.ceil(other.length/2)),...tail],notes};
+}
+function bumpStreak(){const t=today(),st=S.streak;if(st.last===t)return;
+  st.count=(st.last===t-1)?st.count+1:1;st.last=t;st.best=Math.max(st.best,st.count);}
+
+/* ================= Lessons (original content) ================= */
+const LESSONS=[
+{id:'vivid',title:'1. Make it vivid',skill:null,steps:['Memory loves pictures, movement, emotion, smell, sound and the absurd. Plain facts slide off; strange images stick.','Turn the thing into a concrete picture. Make it huge, tiny, moving, funny or a bit gross.','Connect it to something you already know. Spend 3–5 seconds really “seeing” it.'],
+ example:'Remember to buy eggs, matches and basil: picture a giant egg striking a match on its own shell and setting a bunch of basil alight — smell the smoke.',practice:null},
+{id:'story',title:'2. Link it into a story',skill:null,steps:['For a short list, link item 1 to item 2, item 2 to item 3, and so on, with a crazy action between each pair.','Recall by replaying the story from the start.'],
+ example:'Agenda: budget → roof → parking → doors. A pile of budget coins crashes through the roof onto a parked car, whose horn blasts a door shut.',practice:null},
+{id:'palace',title:'3. The memory palace',skill:'palace',steps:['Choose a place you know well (your home, your workplace, a regular drive).','Pick a fixed route and 10 stops along it (loci): front gate, door, counter, crystal shelf…','Place one vivid image of each item at a stop, interacting with it.','To recall, walk the route in your mind and “look” at each stop.'],
+ example:'Palace: your home. Stop 1, front gate: a huge crystal is padlocked to the gate (item: order stock). Stop 2, door: a tuning fork is ringing the doorbell (item: post the ad). Stop 3, kitchen bench: a friend is juggling three calendars (item: fix the calendar).',practice:'palace'},
+{id:'names',title:'4. Names & faces',skill:'names',steps:['Hear it: say the name back (“Lovely to meet you, Martin”).','Spot one distinctive feature on the face — eyebrows, chin, hair, glasses.','Turn the name into a picture (Martin → “mart tin”, Jane → “chain”).','Fix the picture on the feature: tin cans tumbling out of his big eyebrows. Add where you met.','Use the name once in conversation and review it that evening.'],
+ example:'Graham with the silver beard at a meeting: “Graham” → “grey ham”. Picture a grey ham hanging from his beard, dripping on the paperwork.',practice:'people'},
+{id:'peg',title:'5. Number–rhyme pegs (1–10)',skill:null,steps:['Learn fixed pictures for 1–10: 1 bun, 2 shoe, 3 tree, 4 door, 5 hive, 6 sticks, 7 heaven, 8 gate, 9 wine, 10 hen.','Link item #3 to the tree, item #7 to heaven, etc. Great for numbered lists when you have no palace handy.'],
+ example:'Task #4 is “call Jack”: a door with Jack’s face as the knocker, shouting your name.',practice:null},
+{id:'major',title:'6. The major system (numbers)',skill:'numbers',steps:['Each digit is a consonant sound: '+MAJOR_KEY.map(x=>x[0]+' = '+x[1]).join(' · ')+'. Vowels and w, h, y are free.','So 47 = r + k → “rock”; 92 = b + n → “bone”.','Learn one fixed word for each 00–99 (the app has a starter list you can edit).','A long number becomes a chain of pictures, placed in a palace or linked in a story.'],
+ example:'Phone ending 4792: rock + bone → a rock smashing a bone. A holiday 6–22: 06 sash, 22 nun → a nun in a sash waving goodbye.',practice:'numbers'},
+{id:'dates',title:'7. Dates & times',skill:'dates',steps:['Split into pairs: day, month, year (yy), and for times, hour and minute (24h).','Turn each pair into its major-system word.','Make one scene with the event plus the words, and put it where the event happens.'],
+ example:'Meeting 07/10 at 14:00: 07 sock, 10 toes, 14 tire, 00 sauce → a sock on your toes stepping on a tire full of sauce, outside the meeting hall.',practice:'dates'},
+{id:'review',title:'8. Spaced retrieval',skill:null,steps:['Testing yourself beats rereading: pull the answer out before you look.','Review just before you would forget: 1 day, then ~3–6 days, then weeks.','Be honest with Again / Hard / Good / Easy — the app uses it to time the next review and to adjust your level.'],
+ example:'Met 5 people at a meeting: add them tonight, review tomorrow morning, and the app schedules the rest.',practice:'review'}
+];
+const lessonById=id=>LESSONS.find(l=>l.id===id);
+
+/* ================= UI ================= */
+const app=document.getElementById('app');
+const TABS=[['today','☀︎','Today'],['learn','📖','Learn'],['palaces','🏛','Palaces'],['people','🙂','People'],['numbers','#','Numbers'],['progress','📈','Progress'],['more','⋯','More']];
+let tab='today',session=null,ui={};
+function nav(){document.getElementById('nav').innerHTML=TABS.map(t=>`<button data-tab="${t[0]}" class="${tab===t[0]?'on':''}"><b>${t[1]}</b>${t[2]}</button>`).join('');
+  document.getElementById('streak').textContent='🔥 '+S.streak.count+(S.streak.best>S.streak.count?' (best '+S.streak.best+')':'');}
+function go(t){tab=t;ui={};render();window.scrollTo(0,0);}
+function render(){nav();(VIEWS[tab]||VIEWS.today)();}
+document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b){if(session&&!confirm('Leave the session? Progress so far is saved.'))return;session=null;go(b.dataset.tab);}});
+
+const VIEWS={};
+VIEWS.today=function(){
+  if(session)return renderSession();
+  const due=dueCards().length,done=S.streak.last===today(),om=overallMode();
+  const backupDue=!S.lastBackup||(NOW()-S.lastBackup>7*864e5);
+  app.innerHTML=`<div class="card"><h2>${done?'Done for today ✓':'Today’s session'}</h2>
+  <p class="mut">About ${S.settings.minutes} minutes · ${due} review${due===1?'':'s'} due · pace: <span class="pill ${om}">${om}</span></p>
+  <button id="start">${done?'Do a bonus session':'Start session'}</button></div>
+  ${backupDue&&(S.cards.length||S.palaces.length)?`<div class="msg">💾 It’s been a while since your last backup. <button class="ghost" data-go="more">Export now</button></div>`:''}
+  <div class="card"><h3>Quick add</h3><div class="row"><button class="sec small" data-go="people">+ Person</button><button class="sec small" data-go="palaces">+ Palace</button><button class="sec small" id="qdate">+ Date to remember</button></div></div>
+  <div class="card"><h3>How it adapts</h3><p class="mut">Each skill is tracked for accuracy, speed and trend. Doing well → longer gaps, more new items, harder versions and the next lesson. Struggling → fewer new items, shorter gaps, hints, smaller chunks and a warm-up. See <a href="#" data-go="progress">Progress</a>.</p></div>`;
+  app.querySelector('#start').onclick=()=>{session=composeSession();session.i=0;session.results=[];session.start=NOW();render();};
+  app.querySelector('#qdate').onclick=()=>{go('numbers');ui.sub='dates';render();};
+  bindGo();
+};
+function bindGo(){app.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.preventDefault();go(b.dataset.go);});}
+
+/* ---------- session runner ---------- */
+function renderSession(){
+  const s=session;if(s.i>=s.tasks.length)return finishSession();
+  const t=s.tasks[s.i],pct=Math.round(100*s.i/s.tasks.length),mins=Math.floor((NOW()-s.start)/6e4);
+  const head=`<div class="row mut"><span class="grow">Step ${s.i+1} of ${s.tasks.length} · ${mins} min</span><button class="ghost small" id="endnow">End</button></div><div class="bar"><i style="width:${pct}%"></i></div>`;
+  app.innerHTML=head+`<div class="card" id="task"></div>`;
+  app.querySelector('#endnow').onclick=()=>{s.i=s.tasks.length;render();};
+  TASKS[t.type](app.querySelector('#task'),t,()=>{s.i++;render();});
+}
+function finishSession(){
+  const s=session,ok=s.results.filter(r=>r.ok).length,n=s.results.length;
+  bumpStreak();const changes=applyAdaptation();
+  S.sessions.push({t:NOW(),n,ok,mins:Math.round((NOW()-s.start)/6e4)});S.sessions=S.sessions.slice(-120);save();
+  const msg=n&&ok/n<0.7?ENCOURAGE[rnd(ENCOURAGE.length)]:PRAISE[rnd(PRAISE.length)];
+  app.innerHTML=`<div class="card"><h2>Session complete 🔥 ${S.streak.count}</h2><p class="mid">${ok} / ${n} recalled</p><div class="msg">${esc(msg)}</div>
+  ${changes.length?'<h3>What changed</h3><ul class="clean">'+changes.map(c=>`<li><b>${SKILLS[c.k]}</b><br><span class="mut">${esc(c.t)}</span></li>`).join('')+'</ul>':''}
+  ${s.notes.length?'<h3>Today’s plan was tuned because…</h3><ul class="clean">'+s.notes.map(x=>`<li class="mut">${esc(x)}</li>`).join('')+'</ul>':''}
+  <div class="row"><button id="done">Back to Today</button><button class="sec" data-go="progress">See progress</button></div></div>`;
+  session=null;app.querySelector('#done').onclick=()=>go('today');bindGo();nav();
+}
+function timer(){const t0=NOW();return ()=>NOW()-t0;}
+function gradeButtons(el,cb){const g=document.createElement('div');g.className='grades';
+  g.innerHTML='<button class="g1" data-q="1">Again</button><button class="g3" data-q="3">Hard</button><button class="g4" data-q="4">Good</button><button class="g5" data-q="5">Easy</button>';
+  g.onclick=e=>{const b=e.target.closest('button');if(b)cb(+b.dataset.q);};el.appendChild(g);}
+function result(skill,ok,ms){record(skill,ok,ms);if(session)session.results.push({skill,ok});save();}
+function feedback(el,ok,text,next){const d=document.createElement('div');d.innerHTML=`<p class="mid ${ok?'ok':'bad'}">${ok?'✓':'✗'} ${text}</p><button>Next</button>`;el.appendChild(d);d.querySelector('button').onclick=next;d.querySelector('button').focus();}
+
+const TASKS={
+ msg(el,t,next){el.innerHTML=`<div class="msg">${esc(t.text)}</div><button>Let’s go</button>`;el.querySelector('button').onclick=next;},
+ example(el,t,next){const l=lessonById(t.lesson);el.innerHTML=`<h3>Quick refresher: ${esc(l.title)}</h3><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div><button>Got it</button>`;el.querySelector('button').onclick=next;},
+ lesson(el,t,next){const l=lessonById(t.lesson);el.innerHTML=`<p class="pill">New lesson</p><h3>${esc(l.title)}</h3><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div><button>Mark as learned</button>`;
+  el.querySelector('button').onclick=()=>{S.lessonsDone[l.id]=NOW();save();next();};},
+ learnNums(el,t,next){el.innerHTML=`<h3>New number images</h3><p class="mut">Picture each one for a few seconds. They join your review deck.</p><table>${t.nums.map(n=>`<tr><td><b>${n}</b></td><td>${esc(S.major[n])}</td><td class="mut">${esc(n.split('').map(d=>MAJOR_KEY[d][1].split(',')[0]).join(' + '))}</td></tr>`).join('')}</table><button>Add to my deck</button>`;
+  el.querySelector('button').onclick=()=>{t.nums.forEach(n=>S.cards.push(newCard('numbers',n,S.major[n])));save();next();};},
+ review(el,t,next){const c=S.cards.find(x=>x.id===t.id);if(!c)return next();const p=params(c.deck in SKILLS?c.deck:'numbers'),el2=timer();
+  const lvl=(S.skills[c.deck]||{}).level||1;
+  const reverse=c.deck==='names'&&lvl>=4&&p.mult>=1&&Math.random()<0.5;
+  let front;
+  if(c.deck==='names'){const x=c.extra;front=reverse?`<p class="mid">${esc(c.back)}</p><p class="mut">Where did you meet, and what stands out about them?</p>`:
+    `${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="mid">${esc(x.feature||'')}</p><p class="mut">${lvl>=3?'Name? And where did you meet?':'Met: '+esc(x.where||'')+' — name?'}</p>`;}
+  else if(c.deck==='numbers')front=`<p class="mut">Number → image</p><p class="big">${esc(c.front)}</p>`;
+  else front=`<p class="mid">${esc(c.front)}</p>`;
+  const hint=(p.hint||lvl===1)&&(c.hint||c.extra.hook)?`<button class="ghost" id="hint">Show hint</button><p class="mut hide" id="hintt">${esc(c.hint||c.extra.hook)}</p>`:'';
+  el.innerHTML=`<p class="pill">${esc(SKILLS[c.deck]||'Card')}</p>${front}${hint}<input id="ans" placeholder="Type it (optional)" autocomplete="off"><div class="row" style="margin-top:8px"><button id="show">Show answer</button></div><div id="back"></div>`;
+  const h=el.querySelector('#hint');if(h)h.onclick=()=>el.querySelector('#hintt').classList.remove('hide');
+  const show=()=>{const ms=el2(),typed=el.querySelector('#ans').value;let match='';
+    if(typed){const ok=c.deck==='numbers'?majorOk(c.front,typed):norm(typed)===norm(reverse?c.extra.where:c.back)||norm(c.back).split(' ').includes(norm(typed));match=`<p class="${ok?'ok':'bad'}">${ok?'Match ✓':'Not an exact match — grade yourself honestly.'}</p>`;}
+    const x=c.extra||{};
+    el.querySelector('#back').innerHTML=`<hr><p class="mid">${esc(reverse?(x.feature||'')+' · '+(x.where||''):c.back)}</p>${c.deck==='names'?`<p class="mut">${esc(x.where||'')}${x.hook?' · Hook: '+esc(x.hook):''}</p>`:''}${match}`;
+    el.querySelector('#show').remove();
+    gradeButtons(el.querySelector('#back'),q=>{sm2(c,q,p.mult);result(c.deck in SKILLS?c.deck:'numbers',q>=3,ms);next();});};
+  el.querySelector('#show').onclick=show;el.querySelector('#ans').onkeydown=e=>{if(e.key==='Enter')show();};},
+ num(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">${t.warm?'Warm-up':t.win?'Quick win':'Major system'}</p><p class="mut">Type a word for</p><p class="big">${t.n}</p>${t.hint?`<p class="mut">Sounds: ${t.n.split('').map(d=>d+' = '+MAJOR_KEY[d][1]).join(' · ')}</p>`:''}<input id="a" autocomplete="off" autocapitalize="none"><button id="c" style="margin-top:8px">Check</button>`;
+  const go_=()=>{const a=el.querySelector('#a').value,ok=majorOk(t.n,a);result('numbers',ok,el2());el.querySelector('#c').remove();feedback(el,ok,ok?(norm(a)===norm(S.major[t.n])?'':'Valid — your list says “'+esc(S.major[t.n])+'”'):'Your list: '+esc(S.major[t.n]),next);};
+  el.querySelector('#c').onclick=go_;el.querySelector('#a').onkeydown=e=>{if(e.key==='Enter')go_();};el.querySelector('#a').focus();},
+ wordnum(el,t,next){const el2=timer(),opts=shuffle([t.n,...shuffle([...Array(100).keys()].map(pad2).filter(x=>x!==t.n)).slice(0,3)]);
+  el.innerHTML=`<p class="pill">Major system · reverse</p><p class="mut">Which number is</p><p class="big">${esc(S.major[t.n])}</p><div class="grades">${opts.map(o=>`<button class="sec" data-o="${o}">${o}</button>`).join('')}</div>`;
+  el.querySelector('.grades').onclick=e=>{const b=e.target.closest('button');if(!b)return;const ok=b.dataset.o===t.n;result('numbers',ok,el2());el.querySelector('.grades').remove();feedback(el,ok,ok?'':'It was '+t.n,next);};},
+ num4(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">Major system · 4 digits · on the clock</p><p class="big">${t.a}${t.b}</p><p class="mut">Two words, one scene. Type both, separated by a space.</p><input id="a" autocomplete="off" autocapitalize="none"><button id="c" style="margin-top:8px">Check</button>`;
+  const go_=()=>{const w=el.querySelector('#a').value.trim().split(/\s+/),ms=el2(),ok=w.length>=2&&majorOk(t.a,w[0])&&majorOk(t.b,w[1])&&ms<20000;result('numbers',ok,ms);el.querySelector('#c').remove();feedback(el,ok,(ok?'':'Your list: ')+esc(S.major[t.a]+' + '+S.major[t.b])+(ms>=20000?' (over 20s)':''),next);};
+  el.querySelector('#c').onclick=go_;el.querySelector('#a').onkeydown=e=>{if(e.key==='Enter')go_();};},
+ date(el,t,next){const el2=timer(),ch=dateToChunks(t.date,t.parts.includes('Hour')?t.time:'').filter(c=>t.parts.includes(c.label));
+  const [y,m,d]=t.date.split('-');const shown=`${d}/${m}${t.parts.includes('Year')?'/'+y:''}${t.parts.includes('Hour')?' at '+t.time:''}`;
+  el.innerHTML=`<p class="pill">${t.win?'Quick win':'Dates & times'}</p><p class="big" style="font-size:32px">${shown}</p><p class="mut">Type the word for: ${ch.map(c=>c.label.toLowerCase()).join(', ')}</p>${ch.map((c,i)=>`<label>${c.label} (${c.c})${t.hint?' — '+esc(c.c.split('').map(x=>MAJOR_KEY[x][1].split(',')[0]).join('+')):''}</label><input data-i="${i}" autocomplete="off" autocapitalize="none">`).join('')}<button id="c" style="margin-top:8px">Check</button>`;
+  el.querySelector('#c').onclick=()=>{const ms=el2();let all=true;const res=ch.map((c,i)=>{const v=el.querySelector(`[data-i="${i}"]`).value,ok=majorOk(c.c,v);all=all&&ok;return `${c.label}: ${ok?'✓':'✗ '+esc(c.w)}`;});
+   if(t.timed&&ms>30000)all=false;result('dates',all,ms);el.querySelector('#c').remove();feedback(el,all,res.join(' · '),next);};},
+ locus(el,t,next){const pal=S.palaces.find(p=>p.id===t.pid);const L=pal&&pal.loci[t.i];if(!L)return next();const el2=timer();
+  el.innerHTML=`<p class="pill">Palace walk · ${esc(pal.name)}</p><p class="mut">Stop ${t.i+1}</p><p class="mid">${esc(L.name)}</p><p class="mut">What did you place here?</p>${t.hint&&L.image?`<button class="ghost" id="h">Hint</button><p class="mut hide" id="ht">${esc(L.image)}</p>`:''}<button id="s">Reveal</button><div id="b"></div>`;
+  const h=el.querySelector('#h');if(h)h.onclick=()=>el.querySelector('#ht').classList.remove('hide');
+  el.querySelector('#s').onclick=()=>{const ms=el2();el.querySelector('#s').remove();el.querySelector('#b').innerHTML=`<p class="mid">${esc(L.item)}</p><p class="mut">${esc(L.image||'')}</p>`;
+   gradeButtons(el.querySelector('#b'),q=>{result('palace',q>=3,ms);const c=S.cards.find(x=>x.extra&&x.extra.locus===L.id);if(c)sm2(c,q,params('palace').mult);save();next();});};}
+};
+
+/* ---------- Learn ---------- */
+VIEWS.learn=function(){
+  if(ui.lesson){const l=lessonById(ui.lesson);app.innerHTML=`<button class="ghost" id="bk">← Lessons</button><div class="card"><h2>${esc(l.title)}</h2><ol>${l.steps.map(s=>`<li>${esc(s)}</li>`).join('')}</ol><div class="msg"><b>Worked example:</b> ${esc(l.example)}</div>
+   <div class="row"><button id="done">${S.lessonsDone[l.id]?'Learned ✓':'Mark as learned'}</button>${l.practice?`<button class="sec" data-go="${l.practice==='review'?'today':l.practice}">Practise</button>`:''}</div></div>`;
+   app.querySelector('#bk').onclick=()=>{ui={};render();};app.querySelector('#done').onclick=()=>{S.lessonsDone[l.id]=NOW();save();render();};bindGo();return;}
+  app.innerHTML=`<h2>Lessons</h2><p class="mut">Short how-tos with a worked example. The daily session introduces the next one when you’re doing well.</p>`+LESSONS.map(l=>`<div class="card row"><div class="grow"><b>${esc(l.title)}</b></div>${S.lessonsDone[l.id]?'<span class="ok">✓</span>':''}<button class="small" data-l="${l.id}">Open</button></div>`).join('');
+  app.querySelectorAll('[data-l]').forEach(b=>b.onclick=()=>{ui.lesson=b.dataset.l;render();});
+};
+
+/* ---------- Palaces ---------- */
+const TEMPLATE_LOCI=['Front gate','Path / car park','Front door','Entry mat','First shelf on the left','Counter','Window','Back room door','Treatment table / couch','Back door'];
+VIEWS.palaces=function(){
+  if(ui.pid){const p=S.palaces.find(x=>x.id===ui.pid);if(!p){ui={};return render();}
+   app.innerHTML=`<button class="ghost" id="bk">← Palaces</button><div class="card"><h2>${esc(p.name)}</h2><p class="mut">Walk the route in order. Give each stop a fixed name, then attach an item and the vivid image that links them.</p>
+   <ul class="clean">${p.loci.map((l,i)=>`<li><b>${i+1}. ${esc(l.name)}</b>${l.item?`<br>📌 ${esc(l.item)}<br><span class="mut">${esc(l.image||'')}</span>`:'<br><span class="mut">empty</span>'}<div class="row"><button class="ghost small" data-e="${i}">Edit</button><button class="ghost small" data-up="${i}">↑</button><button class="ghost small" data-del="${i}">Remove</button></div></li>`).join('')}</ul>
+   <label>New stop</label><div class="row"><input id="ln" class="grow" placeholder="e.g. Crystal cabinet"><button id="add" class="small">Add</button></div></div>
+   <div class="card" id="ed"></div>
+   <div class="card row"><button id="walk">Walk-through quiz</button><button class="sec" id="clr">Clear items</button><button class="sec" id="rm">Delete palace</button></div>`;
+   app.querySelector('#bk').onclick=()=>{ui={};render();};
+   app.querySelector('#add').onclick=()=>{const v=app.querySelector('#ln').value.trim();if(v){p.loci.push({id:uid(),name:v,item:'',image:''});save();render();}};
+   app.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const l=p.loci.splice(+b.dataset.del,1)[0];S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));save();render();});
+   app.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{const i=+b.dataset.up;if(i>0){[p.loci[i-1],p.loci[i]]=[p.loci[i],p.loci[i-1]];save();render();}});
+   app.querySelectorAll('[data-e]').forEach(b=>b.onclick=()=>{const i=+b.dataset.e,l=p.loci[i],ed=app.querySelector('#ed');
+     ed.innerHTML=`<h3>Stop ${i+1}: ${esc(l.name)}</h3><label>Item to remember</label><input id="it" value="${esc(l.item)}"><label>Vivid image linking item to this stop</label><textarea id="im">${esc(l.image)}</textarea><label><input type="checkbox" id="sr" style="width:auto" ${S.cards.some(c=>c.extra&&c.extra.locus===l.id)?'checked':''}> Add to spaced review</label><button id="sv">Save</button>`;
+     ed.querySelector('#sv').onclick=()=>{l.item=ed.querySelector('#it').value.trim();l.image=ed.querySelector('#im').value.trim();
+       S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));
+       if(ed.querySelector('#sr').checked&&l.item)S.cards.push(newCard('palace',`${p.name} — stop ${i+1}: ${l.name}`,l.item,{locus:l.id,hint:l.image}));save();render();};ed.scrollIntoView();});
+   app.querySelector('#walk').onclick=()=>{const tasks=p.loci.map((l,i)=>l.item?{type:'locus',pid:p.id,i}:null).filter(Boolean);if(!tasks.length)return alert('Attach some items first.');session={tasks,i:0,results:[],start:NOW(),notes:[],mode:'steady'};tab='today';render();};
+   app.querySelector('#clr').onclick=()=>{if(confirm('Clear all items (keep the stops)?')){p.loci.forEach(l=>{l.item='';l.image='';S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));});save();render();}};
+   app.querySelector('#rm').onclick=()=>{if(confirm('Delete this palace?')){const ids=new Set(p.loci.map(l=>l.id));S.cards=S.cards.filter(c=>!(c.extra&&ids.has(c.extra.locus)));S.palaces=S.palaces.filter(x=>x!==p);save();ui={};render();}};
+   return;}
+  app.innerHTML=`<h2>Memory palaces</h2>${S.palaces.map(p=>`<div class="card row"><div class="grow"><b>${esc(p.name)}</b><br><span class="mut">${p.loci.length} stops · ${p.loci.filter(l=>l.item).length} in use</span></div><button class="small" data-p="${p.id}">Open</button></div>`).join('')||'<p class="mut">No palaces yet. Start with a place you can walk through with your eyes closed.</p>'}
+  <div class="card"><label>Palace name</label><input id="pn" placeholder="e.g. My home"><label><input type="checkbox" id="tpl" style="width:auto" checked> Start with 10 suggested stops (rename them to match the real place)</label><button id="np" style="margin-top:8px">Create palace</button></div>`;
+  app.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{ui.pid=b.dataset.p;render();});
+  app.querySelector('#np').onclick=()=>{const n=app.querySelector('#pn').value.trim();if(!n)return;const p={id:uid(),name:n,loci:app.querySelector('#tpl').checked?TEMPLATE_LOCI.map(x=>({id:uid(),name:x,item:'',image:''})):[]};S.palaces.push(p);save();ui.pid=p.id;render();};
+};
+
+/* ---------- People ---------- */
+function resizePhoto(file,cb){const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const s=200,c=document.createElement('canvas'),k=Math.min(1,s/Math.max(img.width,img.height));c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);cb(c.toDataURL('image/jpeg',0.7));};img.src=r.result;};r.readAsDataURL(file);}
+VIEWS.people=function(){
+  const people=S.cards.filter(c=>c.deck==='names');const q=norm(ui.q||'');
+  const list=people.filter(c=>!q||norm(c.back+' '+c.extra.where+' '+c.extra.feature).includes(q));
+  const ed=ui.edit?S.cards.find(c=>c.id===ui.edit):null,x=ed?ed.extra:{};
+  app.innerHTML=`<h2>Names & faces</h2><div class="card"><h3>${ed?'Edit':'Add a person'}</h3>
+  <label>Name</label><input id="nm" value="${esc(ed?ed.back:'')}" placeholder="e.g. Martin">
+  <label>Where / when you met</label><input id="wh" value="${esc(x.where||'')}" placeholder="e.g. Community meeting, 7 Oct">
+  <label>Most distinctive feature</label><input id="ft" value="${esc(x.feature||'')}" placeholder="e.g. bushy eyebrows, blue glasses">
+  <label>Hook image (name → picture, fixed on the feature)</label><textarea id="hk" placeholder="e.g. “mine dirt” pouring out of his eyebrows">${esc(x.hook||'')}</textarea>
+  <label>Photo (optional, stays on this phone)</label><input type="file" id="ph" accept="image/*">${x.photo?`<img class="face" src="${x.photo}">`:''}
+  <div class="row" style="margin-top:8px"><button id="sv">${ed?'Save':'Add person'}</button>${ed?'<button class="sec" id="cn">Cancel</button><button class="sec" id="dl">Delete</button>':''}</div></div>
+  <input id="q" placeholder="Search people…" value="${esc(ui.q||'')}">
+  <ul class="clean card">${list.map(c=>`<li class="row">${c.extra.photo?`<img class="face" src="${c.extra.photo}">`:''}<div class="grow"><b>${esc(c.back)}</b><br><span class="mut">${esc(c.extra.where||'')} · ${esc(c.extra.feature||'')}</span></div><button class="ghost small" data-ed="${c.id}">Edit</button></li>`).join('')||'<li class="mut">No one yet. Add people you meet — colleagues, clients, neighbours.</li>'}</ul>`;
+  let photo=x.photo||'';
+  app.querySelector('#ph').onchange=e=>{const f=e.target.files[0];if(f)resizePhoto(f,d=>{photo=d;});};
+  app.querySelector('#sv').onclick=()=>{const v=id=>app.querySelector(id).value.trim(),name=v('#nm');if(!name)return alert('Add a name.');
+    const extra={where:v('#wh'),feature:v('#ft'),hook:v('#hk'),photo};
+    if(ed){ed.back=name;ed.extra=extra;ed.front=extra.feature||extra.where;ed.hint=extra.hook;}else S.cards.push(newCard('names',extra.feature||extra.where||'?',name,{...extra,hint:extra.hook}));
+    save();ui={};render();};
+  const cn=app.querySelector('#cn');if(cn)cn.onclick=()=>{ui={};render();};
+  const dl=app.querySelector('#dl');if(dl)dl.onclick=()=>{if(confirm('Delete '+ed.back+'?')){S.cards=S.cards.filter(c=>c!==ed);save();ui={};render();}};
+  app.querySelector('#q').oninput=e=>{ui.q=e.target.value;const pos=e.target.selectionStart;render();const i=app.querySelector('#q');i.focus();i.setSelectionRange(pos,pos);};
+  app.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>{ui.edit=b.dataset.ed;render();window.scrollTo(0,0);});
+};
+
+/* ---------- Numbers / dates ---------- */
+VIEWS.numbers=function(){
+  const sub=ui.sub||'convert';
+  const tabs=`<div class="row">${[['convert','Converter'],['dates','Dates & times'],['drill','Free drill'],['list','My 00–99']].map(t=>`<button class="small ${sub===t[0]?'':'sec'}" data-sub="${t[0]}">${t[1]}</button>`).join('')}</div>`;
+  let body='';
+  if(sub==='convert')body=`<div class="card"><h3>Number → images</h3><input id="nn" inputmode="numeric" placeholder="e.g. 0427 555 123"><div id="out"></div></div><div class="card"><h3>Key</h3><table>${MAJOR_KEY.map(k=>`<tr><td><b>${k[0]}</b></td><td>${k[1]}</td></tr>`).join('')}</table></div>`;
+  if(sub==='dates')body=`<div class="card"><h3>Date / time → images</h3><label>What happens</label><input id="ev" placeholder="e.g. Dentist appointment"><label>Date</label><input type="date" id="dd"><label>Time (optional)</label><input type="time" id="tt"><div id="dout"></div><button id="dadd" style="margin-top:8px">Add to review deck</button></div>`;
+  if(sub==='drill')body=`<div class="card" id="task"></div>`;
+  if(sub==='list')body=`<div class="card"><p class="mut">One word per line, 00 to 99. Pick nouns you can see and touch. Changes apply everywhere.</p><textarea id="ml" style="min-height:300px">${[...Array(100).keys()].map(i=>pad2(i)+' '+S.major[pad2(i)]).join('\n')}</textarea><div id="mlw" class="mut"></div><button id="msv">Save list</button></div>`;
+  app.innerHTML=`<h2>Numbers, dates & times</h2>${tabs}${body}`;
+  app.querySelectorAll('[data-sub]').forEach(b=>b.onclick=()=>{ui.sub=b.dataset.sub;render();});
+  if(sub==='convert'){const i=app.querySelector('#nn');i.oninput=()=>{app.querySelector('#out').innerHTML='<ul class="clean">'+numberToWords(i.value).map(c=>`<li><b>${c.c}</b> → ${esc(c.w)}</li>`).join('')+'</ul>';};}
+  if(sub==='dates'){const upd=()=>{const ch=dateToChunks(app.querySelector('#dd').value,app.querySelector('#tt').value);app.querySelector('#dout').innerHTML='<ul class="clean">'+ch.map(c=>`<li>${c.label} <b>${c.c}</b> → ${esc(c.w)}</li>`).join('')+'</ul>'+(ch.length?`<p class="msg">Scene idea: ${esc(app.querySelector('#ev').value||'the event')} with ${ch.map(c=>'a '+c.w).join(', ')} — all in one picture, placed where it happens.</p>`:'');};
+    ['#dd','#tt','#ev'].forEach(s=>app.querySelector(s).oninput=upd);
+    app.querySelector('#dadd').onclick=()=>{const ev=app.querySelector('#ev').value.trim(),d=app.querySelector('#dd').value,t=app.querySelector('#tt').value;if(!ev||!d)return alert('Add the event and a date.');
+      const [y,m,dd]=d.split('-');const ch=dateToChunks(d,t);S.cards.push(newCard('dates',`When is: ${ev}?`,`${dd}/${m}/${y}${t?' at '+t:''}`,{hint:ch.map(c=>c.w).join(' + ')}));save();alert('Added.');};}
+  if(sub==='drill'){const run=()=>{const t=Math.random()<0.6?numberTask():dateTask();TASKS[t.type](app.querySelector('#task'),t,run);};run();}
+  if(sub==='list')app.querySelector('#msv').onclick=()=>{const bad=[];app.querySelector('#ml').value.split('\n').forEach(line=>{const m=line.trim().match(/^(\d\d)\s+(.+)$/);if(m){S.major[m[1]]=m[2].trim();if(majorEncode(m[2])!==m[1])bad.push(m[1]+' '+m[2]);}});save();
+    app.querySelector('#mlw').innerHTML=bad.length?'Saved. These may not follow the sounds (the checker is approximate, so silent letters can fool it): '+esc(bad.join(', ')):'Saved ✓';};
+};
+
+/* ---------- Progress ---------- */
+VIEWS.progress=function(){
+  const rows=Object.keys(SKILLS).map(k=>{const p=profile(k);const arrow=p.n<12?'·':p.trend>0.05?'↑ improving':p.trend<-0.05?'↓ dipping':'→ steady';
+   return `<div class="card"><div class="row"><b class="grow">${SKILLS[k]}</b><span class="pill ${p.mode}">${p.mode}</span></div>
+   <div class="row mut"><span>Level ${p.level}/5</span><span>${p.acc==null?'no answers yet':Math.round(p.acc*100)+'% recent accuracy'}</span><span>${p.msRecent?(p.msRecent/1000).toFixed(1)+'s typical':''}</span><span>${arrow}</span></div>
+   <div class="bar" style="margin:6px 0"><i style="width:${p.level*20}%"></i></div><p class="mut">Now: ${esc(levelDesc(k,p.level))}</p><p>${esc(p.why)}</p></div>`;}).join('');
+  const due=dueCards().length,tot=S.cards.length,last7=S.sessions.filter(s=>NOW()-s.t<7*864e5);
+  app.innerHTML=`<h2>Progress</h2><div class="card row"><span class="grow">🔥 ${S.streak.count} day streak (best ${S.streak.best})</span><span>${last7.length} sessions this week</span><span>${tot} cards · ${due} due</span></div>${rows}
+  <div class="card"><h3>Recent adjustments</h3><ul class="clean">${S.adaptLog.slice(0,10).map(a=>`<li><b>${esc(SKILLS[a.skill]||'')}</b> <span class="mut">${new Date(a.t).toLocaleDateString()}</span><br>${esc(a.text)}</li>`).join('')||'<li class="mut">None yet. Levels change after about 10 answers in a skill.</li>'}</ul></div>`;
+};
+
+/* ---------- More: backup, import, settings ---------- */
+VIEWS.more=function(){
+  app.innerHTML=`<h2>Backup & settings</h2>
+  <div class="card"><h3>Backup</h3><p class="mut">Everything lives only in this browser. Export weekly and keep the file in Dropbox/Drive.${S.lastBackup?' Last export: '+new Date(S.lastBackup).toLocaleDateString():''}</p><div class="row"><button id="ex">Export JSON</button><label class="btn sec" style="margin:0;color:var(--ink)">Import JSON<input type="file" id="im" accept=".json,application/json" class="hide"></label></div></div>
+  <div class="card"><h3>Import cards from notes (e.g. Obsidian)</h3><p class="mut">One per line: <code>front :: back</code>. Start a line with <code>#names</code>, <code>#dates</code>, <code>#palace</code> or <code>#numbers</code> to set the deck for the lines after it. For #names use <code>Name :: where met :: feature :: hook</code>.</p><textarea id="tx"></textarea><button id="ti">Import lines</button></div>
+  <div class="card"><h3>Settings</h3><label>Daily session length (minutes)</label><select id="mn">${[5,10,15,20].map(m=>`<option ${S.settings.minutes==m?'selected':''}>${m}</option>`).join('')}</select><button class="sec" id="rs" style="margin-top:12px">Reset everything</button></div>
+  <p class="mut">Free, offline, private. Not affiliated with any commercial memory app.</p>`;
+  app.querySelector('#ex').onclick=()=>{S.lastBackup=NOW();save();const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='memory-trainer-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();};
+  app.querySelector('#im').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const d=JSON.parse(r.result);if(!d.cards||!d.skills)throw 0;if(confirm('Replace current data with this backup?')){localStorage.setItem(KEY,JSON.stringify(d));load();alert('Restored.');go('today');}}catch(x){alert('That file is not a Memory Trainer backup.');}};r.readAsText(f);};
+  app.querySelector('#ti').onclick=()=>{const n=importLines(app.querySelector('#tx').value);save();alert(n+' cards imported.');};
+  app.querySelector('#mn').onchange=e=>{S.settings.minutes=+e.target.value;save();};
+  app.querySelector('#rs').onclick=()=>{if(confirm('Delete ALL data on this phone? Export first if unsure.')){S=freshState();save();go('today');}};
+};
+function importLines(txt){let deck='custom',n=0;txt.split('\n').forEach(line=>{line=line.trim();const tag=line.match(/^#(names|dates|palace|numbers|custom)\b/i);if(tag){deck=tag[1].toLowerCase();return;}
+  const parts=line.split('::').map(s=>s.trim());if(parts.length<2||!parts[0])return;
+  if(deck==='names')S.cards.push(newCard('names',parts[2]||parts[1],parts[0],{where:parts[1]||'',feature:parts[2]||'',hook:parts[3]||'',hint:parts[3]||''}));
+  else S.cards.push(newCard(deck==='custom'?'dates':deck,parts[0],parts[1]));n++;});return n;}
+
+/* ================= boot ================= */
+load();render();
+if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').catch(()=>{});
+window.MT={get S(){return S;},set S(v){S=v;},freshState,profile,composeSession,applyAdaptation,sm2,majorEncode,majorOk,dateToChunks,numberToWords,record,params,overallMode,newCard,importLines,setNow:f=>{NOW=f;},today,TASKS,render,go,save,load};
+</script>
+</body>
+</html>
