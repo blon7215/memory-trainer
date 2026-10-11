@@ -58,6 +58,10 @@ button.xl{display:block;width:100%;min-height:56px;font-size:18px;margin-top:10p
 .grades button{min-height:56px}
 input{min-height:48px;font-size:17px}
 nav button{min-height:56px}
+.chip{background:var(--pri2);color:var(--ink);border-radius:99px;padding:6px 10px;min-height:40px;font-size:14px}.chip.on{background:#d9f3e3;color:#17663a}
+.spk{float:right;margin-left:8px}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}.tgrid .card{margin:0;text-align:center}
+details.card summary{cursor:pointer;min-height:40px;display:flex;align-items:center}
 </style>
 </head>
 <body>
@@ -85,7 +89,7 @@ function freshState(){
   const major={};DEFAULT_MAJOR.forEach((w,i)=>major[pad2(i)]=w);
   const skills={};Object.keys(SKILLS).forEach(k=>skills[k]={level:1,log:[],sinceChange:0});
   return {v:1,cards:[],palaces:[],major,skills,lessonsDone:{},streak:{count:0,best:0,last:null},
-    adaptLog:[],settings:{minutes:10},sessions:[],lastBackup:null,lastWarmupMsg:'',onboarded:false,starterDone:false};
+    adaptLog:[],settings:{minutes:10},sessions:[],lastBackup:null,lastWarmupMsg:'',onboarded:false,starterDone:false,groups:[],timedLog:[]};
 }
 let S;
 function load(){try{S=JSON.parse(localStorage.getItem(KEY))||freshState();}catch(e){S=freshState();}
@@ -240,7 +244,10 @@ function composeSession(){
   // 3. study new things
   if(firstDay){ensureStarter().forEach(id=>learn.push({type:'study',id}));}
   const newCap={support:3,steady:5,stretch:8}[om];
-  const unseen=S.cards.filter(c=>!c.seen&&c.deck!=='palace'&&c.deck!=='everyday'&&(c.deck!=='numbers'||majorReady)).slice(0,newCap);
+  const dl=activeDeadlines(),dlSet=new Set();dl.forEach(g=>groupCards(g.tag).forEach(c=>{if(c.deck!=='numbers'||majorReady)dlSet.add(c);}));
+  const dlUnseen=[...dlSet].filter(c=>!c.seen&&c.deck!=='everyday').slice(0,10);
+  const unseen=[...dlUnseen,...S.cards.filter(c=>!c.seen&&!dlSet.has(c)&&c.deck!=='palace'&&c.deck!=='everyday'&&(c.deck!=='numbers'||majorReady))].slice(0,Math.max(newCap,dlUnseen.length));
+  dl.forEach(g=>{const d=dayNum(g.target)-today();notes.push(`“${g.tag}”: ${d} day${d===1?'':'s'} to go — these people come first today (${readiness(g.tag)}% ready).`);});
   unseen.forEach(c=>{learn.push({type:'study',id:c.id});fresh.push({type:'review',id:c.id,fresh:true});});
   let nl=0;S.palaces.forEach(p=>p.loci.forEach((l,i)=>{if(l.item&&!l.seen&&nl<newCap){nl++;learn.push({type:'studyLocus',pid:p.id,i});fresh.push({type:'locus',pid:p.id,i,fresh:true});}}));
   if(majorReady){const np=params('numbers').newItems,haveNums=new Set(S.cards.filter(c=>c.deck==='numbers').map(c=>c.front));
@@ -250,7 +257,8 @@ function composeSession(){
   // 4. due reviews (only things already studied), weak skills first
   const weight=k=>!k?1:profs[k].mode==='support'?0:profs[k].mode==='steady'?1:2;
   const due=dueCards().filter(c=>c.seen&&!unseen.includes(c)&&(c.deck!=='numbers'||numsUnlocked())&&(c.deck!=='palace'||S.palaces.some(p=>p.loci.some(l=>l.id===c.extra.locus&&l.seen)))).sort((a,b)=>weight(skillOf(a))-weight(skillOf(b))||a.ef-b.ef);
-  const reviewCap=Math.round(budget*0.6);due.slice(0,reviewCap).forEach(c=>recall.push({type:'review',id:c.id}));
+  const dlRev=[...dlSet].filter(c=>c.seen&&!unseen.includes(c)&&((c.revs||0)+(c.prac||0))<3&&c.lastRev!==today());
+  const reviewCap=Math.max(Math.round(budget*0.6),dlRev.length);[...dlRev,...due.filter(c=>!dlRev.includes(c))].slice(0,reviewCap).forEach(c=>recall.push({type:'review',id:c.id,dl:dlRev.includes(c)}));
   if(due.length>reviewCap)notes.push(`${due.length-reviewCap} reviews held over to keep today to about ${S.settings.minutes} minutes.`);
   // 5. drills, weighted toward weak skills, on learned material only
   const ks=['numbers','dates','palace'].filter(k=>has[k]);
@@ -267,8 +275,8 @@ function composeSession(){
     else if(strong.skill==='names'){const nc=S.cards.filter(c=>c.deck==='names'&&c.reps>0&&c.seen).sort((a,b)=>b.ef-a.ef)[0];if(nc&&!recall.some(x=>x.id===nc.id))t={type:'review',id:nc.id,win:true};}
     if(t)recall.push(t);}
   Object.values(profs).forEach(p=>{if(p.mode==='stretch'&&has[p.skill])notes.push(`${SKILLS[p.skill]}: faster pace — ${PRAISE[rnd(PRAISE.length)]}`);});
-  const locus=recall.filter(t=>t.type==='locus'),other=shuffle(recall.filter(t=>t.type!=='locus'));
-  const tasks=[...head,...learn,...other.slice(0,Math.ceil(other.length/2)),...locus,...other.slice(Math.ceil(other.length/2)),...fresh];
+  const locus=recall.filter(t=>t.type==='locus'),dlr=recall.filter(t=>t.dl),other=shuffle(recall.filter(t=>t.type!=='locus'&&!t.dl));
+  const tasks=[...head,...learn,...dlr,...other.slice(0,Math.ceil(other.length/2)),...locus,...other.slice(Math.ceil(other.length/2)),...fresh];
   const empty=!tasks.some(t=>RECALL_TYPES.includes(t.type)||STUDY_TYPES.includes(t.type));
   return {mode:om,tasks:empty?[]:tasks,notes,empty};
 }
@@ -285,6 +293,8 @@ const LESSONS=[
  example:'Palace: your home. Stop 1, front gate: a huge crystal is padlocked to the gate (item: order stock). Stop 2, door: a tuning fork is ringing the doorbell (item: post the ad). Stop 3, kitchen bench: a friend is juggling three calendars (item: fix the calendar).',practice:'palace'},
 {id:'names',title:'4. Names & faces',skill:'names',steps:['Hear it: say the name back (“Lovely to meet you, Martin”).','Spot one distinctive feature on the face — eyebrows, chin, hair, glasses.','Turn the name into a picture (Martin → “mart tin”, Jane → “chain”).','Fix the picture on the feature: tin cans tumbling out of his big eyebrows. Add where you met.','Use the name once in conversation and review it that evening.'],
  example:'Graham with the silver beard at a meeting: “Graham” → “grey ham”. Picture a grey ham hanging from his beard, dripping on the paperwork.',practice:'people'},
+{id:'suave',title:'4b. BE SUAVE: a routine for names',skill:'names',steps:['B — Believe you can remember names. Saying “I’m bad with names” makes it true.','E — Exercise: a little practice every day (Today, Rehearse, Timed round).','S — Say it: repeat the name straight back. “Rosa — lovely to meet you.”','U — Use it once or twice while you talk.','A — Ask about it: the spelling, or where the name comes from.','V — Visualise: turn the name into a picture and fix it on a feature of their face (that’s the hook in People).','E — End with it: say their name when you say goodbye.','Afterwards, ⚡ Quick add them in People (15 seconds), then tick the after-meeting checklist.'],
+ example:'You meet Rosa at a garden club. Say it: “Rosa, nice to meet you.” Ask: “Rosa like the flower?” Visualise: a big red rose tucked behind her ear, next to her silver earrings. Use it: “So Rosa, what are you growing this year?” End with it: “See you next month, Rosa!” Then Quick add her on the way to the car.',practice:'people'},
 {id:'peg',title:'5. Number–rhyme pegs (1–10)',skill:null,steps:['Learn fixed pictures for 1–10: 1 bun, 2 shoe, 3 tree, 4 door, 5 hive, 6 sticks, 7 heaven, 8 gate, 9 wine, 10 hen.','Link item #3 to the tree, item #7 to heaven, etc. Great for numbered lists when you have no palace handy.'],
  example:'Task #4 is “call Jack”: a door with Jack’s face as the knocker, shouting your name.',practice:null},
 {id:'major',title:'6. The major system (numbers)',skill:'numbers',steps:['Each digit is a consonant sound: '+MAJOR_KEY.map(x=>x[0]+' = '+x[1]).join(' · ')+'. Vowels and w, h, y are free.','So 47 = r + k → “rock”; 92 = b + n → “bone”.','Learn one fixed word for each 00–99 (the app has a starter list you can edit).','A long number becomes a chain of pictures, placed in a palace or linked in a story.'],
@@ -296,8 +306,43 @@ const LESSONS=[
 ];
 const lessonById=id=>LESSONS.find(l=>l.id===id);
 
+/* ================= Groups, deadlines, rehearsal, speech (v3.1) ================= */
+function parseTags(s){return [...new Set(String(s||'').split(',').map(x=>x.trim()).filter(Boolean))];}
+function tagsOf(c){return (c&&c.extra&&c.extra.tags)||[];}
+const tagEq=(a,b)=>norm(a)===norm(b);
+function allTags(){const m={};const add=(t,k)=>{const key=Object.keys(m).find(x=>tagEq(x,t))||t;m[key]=(m[key]||0)+k;};
+  S.cards.forEach(c=>tagsOf(c).forEach(t=>add(t,1)));S.palaces.forEach(p=>(p.tags||[]).forEach(t=>add(t,p.loci.filter(l=>l.item).length)));
+  S.groups.forEach(g=>{if(!Object.keys(m).some(x=>tagEq(x,g.tag)))m[g.tag]=0;});return m;}
+function groupCards(tag){return S.cards.filter(c=>c.deck!=='palace'&&tagsOf(c).some(t=>tagEq(t,tag)));}
+// readiness: each item counts 0 until studied, then 1/3 per review (normal or rehearsal), capped at 3
+function itemReady(c){return c.seen?Math.min(3,(c.revs||0)+(c.prac||0))/3:0;}
+function readiness(tag){const cs=groupCards(tag);if(!cs.length)return 0;return Math.round(100*cs.reduce((s,c)=>s+itemReady(c),0)/cs.length);}
+function dayNum(str){const [y,m,d]=String(str).split('-').map(Number);return Math.round(Date.UTC(y,m-1,d)/864e5);}
+function activeDeadlines(){const t=today();return S.groups.filter(g=>g.target&&dayNum(g.target)>=t).sort((a,b)=>a.target.localeCompare(b.target));}
+const practicing=()=>!!(session&&session.practice);
+function rehearsalTasks(tag){const study=[],rec=[];
+  groupCards(tag).forEach(c=>{if(c.deck==='numbers'&&!numsUnlocked())return;if(!c.seen)study.push({type:'study',id:c.id});rec.push({type:'review',id:c.id,fresh:true});});
+  S.palaces.filter(p=>(p.tags||[]).some(t=>tagEq(t,tag))).forEach(p=>p.loci.forEach((l,i)=>{if(!l.item)return;if(!l.seen)study.push({type:'studyLocus',pid:p.id,i});rec.push({type:'locus',pid:p.id,i});}));
+  if(!rec.length)return [];
+  return [...study,...(study.length?[{type:'msg',text:'Now let’s see what stuck.',btn:'Start recalling'}]:[]),...shuffle(rec)];}
+function startRehearsal(tag,back){const tasks=rehearsalTasks(tag);if(!tasks.length)return alert('Nothing in “'+tag+'” yet. Add some people or items to this group first.');
+  startSession({mode:'steady',practice:true,tag,back:back||'today',tasks,notes:[]});}
+const TTS=typeof window!=='undefined'&&!!window.speechSynthesis&&typeof window.SpeechSynthesisUtterance==='function';
+const SRec=typeof window!=='undefined'?(window.SpeechRecognition||window.webkitSpeechRecognition||null):null;
+function say(text){if(!TTS||!text)return;try{const ss=window.speechSynthesis;ss.cancel();const u=new window.SpeechSynthesisUtterance(text);const vs=(ss.getVoices&&ss.getVoices())||[];
+  const v=vs.find(v=>/en[-_]AU/i.test(v.lang))||vs.find(v=>/^en[-_]GB/i.test(v.lang))||vs.find(v=>/^en/i.test(v.lang));if(v)u.voice=v;u.lang=v?v.lang:'en-AU';u.rate=0.95;ss.speak(u);}catch(e){}}
+function readText(el){return [...el.querySelectorAll('.pill,.prompt,h3,.big,.mid,.msg,li')].filter(n=>!n.closest('.hide')&&!n.closest('#qht')).map(n=>n.textContent.trim()).filter(Boolean).join('. ');}
+function addSpeech(tk,t){if(!tk)return;
+  if(TTS&&!tk.querySelector('#spk')){const b=document.createElement('button');b.className='sec small spk';b.id='spk';b.type='button';b.textContent='🔊 Read aloud';b.onclick=()=>say(readText(tk));tk.prepend(b);}
+  if(SRec&&t&&t.type==='study'&&!tk.querySelector('#mic')){const c=S.cards.find(x=>x.id===t.id);if(!c||c.deck!=='names')return;
+    const w=document.createElement('div');w.innerHTML='<button class="sec" id="mic" type="button">🎤 Say it back</button><p class="mut" id="micout"></p>';const go=tk.querySelector('#go');tk.insertBefore(w,go);
+    w.querySelector('#mic').onclick=()=>{const out=w.querySelector('#micout');try{const r=new SRec();r.lang='en-AU';r.maxAlternatives=3;out.textContent='Listening…';
+      r.onresult=e=>{const heard=e.results[0][0].transcript||'';out.textContent=norm(heard).includes(norm(c.back).split(' ')[0])?'✓ Heard “'+heard+'”. Nice!':'I heard “'+heard+'”. Try once more — or just say it out loud, that counts too.';};
+      r.onerror=()=>{out.textContent='Couldn’t listen just now. Saying it out loud still counts!';};r.start();}catch(e){out.textContent='Say it out loud — that’s the important part.';}};}}
+
+let tick=null;
 /* ================= UI ================= */
-const APP_VERSION='3.0';
+const APP_VERSION='3.1';
 const app=document.getElementById('app');
 const TABS=[['today','☀︎','Today'],['learn','📖','Learn'],['palaces','🏛','Palaces'],['people','🙂','People'],['numbers','#','Numbers'],['progress','📈','Progress'],['more','⋯','More']];
 const MODE_LABEL={support:'gentle',steady:'normal',stretch:'faster'};
@@ -305,7 +350,7 @@ let tab='today',session=null,ui={},tour=null;
 function nav(){document.getElementById('nav').innerHTML=TABS.map(t=>`<button data-tab="${t[0]}" class="${tab===t[0]?'on':''}"><b>${t[1]}</b>${t[2]}</button>`).join('');
   document.getElementById('streak').textContent='🔥 '+S.streak.count+(S.streak.best>S.streak.count?' (best '+S.streak.best+')':'');}
 function go(t){tab=t;ui={};render();window.scrollTo(0,0);}
-function render(){nav();if(tour!==null)return renderTour();(VIEWS[tab]||VIEWS.today)();}
+function render(){if(tick){clearInterval(tick);tick=null;}nav();if(tour!==null)return renderTour();(VIEWS[tab]||VIEWS.today)();}
 document.getElementById('nav').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b){if(session&&tour===null&&!confirm('Leave today’s practice? Progress so far is saved.'))return;tour=null;session=null;go(b.dataset.tab);}});
 document.getElementById('hq').addEventListener('click',()=>{tour=0;render();window.scrollTo(0,0);});
 document.getElementById('hh').addEventListener('click',()=>{if(session&&tour===null&&!confirm('Leave today’s practice? Progress so far is saved.'))return;tour=null;session=null;go('help');});
@@ -315,7 +360,7 @@ const TOUR=[
  {h:'Welcome to Memory Trainer 👋',b:`<p>This app helps you remember <b>names, faces, places, numbers, dates and times</b> using proven memory tricks.</p><p>It’s free, works offline, and everything you type stays on this phone.</p>`},
  {h:'Learn first, then remember',b:`<p>You will <b>never</b> be tested on something you haven’t been shown.</p><ol><li>A <b>Study</b> card shows you the new thing and a picture to imagine. Tap <b>Got it</b>.</li><li>A few minutes later the app asks you to <b>remember</b> it.</li><li>It brings it back again just before you’d forget.</li></ol>`},
  {h:'Your 10-minute daily routine',b:`<ol><li>Open the app and stay on <b>Today</b>.</li><li>Tap <b>Start today’s practice</b>.</li><li>Study anything new, then answer the questions.</li><li>Rate how easy each one felt.</li></ol><p>Same time each day is best. Your streak 🔥 is at the top.</p>`},
- {h:'What the tabs do',b:`<ul class="clean"><li>☀︎ <b>Today</b> — your daily practice. Reviews happen here too.</li><li>📖 <b>Learn</b> — 8 short lessons, one trick each.</li><li>🏛 <b>Palaces</b> — build a “memory palace” from a place you know.</li><li>🙂 <b>People</b> — add someone right after you meet them.</li><li># <b>Numbers</b> — turn dates, times and numbers into pictures.</li><li>📈 <b>Progress</b> — how you’re going and what the app is adjusting.</li><li>⋯ <b>More</b> — backup and settings.</li></ul>`},
+ {h:'What the tabs do',b:`<ul class="clean"><li>☀︎ <b>Today</b> — your daily practice. Reviews happen here too.</li><li>📖 <b>Learn</b> — 9 short lessons, one trick each.</li><li>🏛 <b>Palaces</b> — build a “memory palace” from a place you know.</li><li>🙂 <b>People</b> — ⚡ Quick add someone right after you meet them, sort them into groups, and try a ⏱ timed round.</li><li>🔊 Tap <b>Read aloud</b> on any card to hear it spoken.</li><li># <b>Numbers</b> — turn dates, times and numbers into pictures.</li><li>📈 <b>Progress</b> — how you’re going and what the app is adjusting.</li><li>⋯ <b>More</b> — backup and settings.</li></ul>`},
  {h:'If you get stuck',b:`<p>Every question has three helpers:</p><ul class="clean"><li>💡 <b>Hint</b> — a nudge, not the answer.</li><li>👀 <b>Show me</b> — see the answer. It just comes back later, no penalty.</li><li>↩︎ <b>Skip — I haven’t learned this</b> — shows you the study card again. Never counts against you.</li></ul><p>The app goes slower when you’re finding it hard, and faster when you’re doing well. Tap <b>?</b> or <b>Help</b> at the top any time.</p>`},
  {h:'Ready?',b:`<p>Lesson 1 takes about 3 minutes: one trick, then you’ll use it to remember 5 everyday things.</p>`,last:true}
 ];
@@ -330,7 +375,7 @@ function renderTour(){const i=tour,t=TOUR[i];
   if(q('#ts'))q('#ts').onclick=()=>{close();render();};
   if(q('#tx'))q('#tx').onclick=()=>{close();render();};
   if(q('#t1'))q('#t1').onclick=()=>{close();session=null;startLesson1();};}
-function startSession(s){session=s;session.i=0;session.results=[];session.start=NOW();session.notes=session.notes||[];tab='today';render();window.scrollTo(0,0);}
+function startSession(s){if(tick){clearInterval(tick);tick=null;}session=s;session.i=0;session.results=[];session.start=NOW();session.notes=session.notes||[];tab='today';render();window.scrollTo(0,0);}
 function startLesson1(){if(!S.lessonsDone.vivid||!S.starterDone){const s=composeSession();if(s.tasks.some(t=>t.type==='lesson'&&t.lesson==='vivid'))return startSession(s);}
   startStarter(true);}
 function startStarter(withLesson){const ids=ensureStarter();
@@ -352,6 +397,7 @@ VIEWS.today=function(){
   <p class="mut">About ${S.settings.minutes} minutes · ${due} review${due===1?'':'s'} ready · pace: <span class="pill ${om}">${MODE_LABEL[om]}</span></p>
   <button class="xl" id="start">${done?'Do some extra practice':'Start today’s practice'}</button></div>
   <div id="guide"></div>
+  ${S.groups.filter(g=>g.target&&dayNum(g.target)>=today()).map(g=>{const d=dayNum(g.target)-today(),r=readiness(g.tag),n=groupCards(g.tag).length;return `<div class="card dl"><div class="row"><b class="grow">📅 ${esc(g.tag)}</b><span>${d===0?'Today!':d+' day'+(d===1?'':'s')+' to go'}</span></div><p class="mut">${n} ${n===1?'person':'people'} · <b>${r}% ready</b></p><div class="bar"><i style="width:${r}%"></i></div><button class="small" style="margin-top:8px" data-reh="${esc(g.tag)}">Rehearse now</button></div>`;}).join('')}
   ${steps.length?`<div class="card"><h3>Next steps</h3><ul class="clean">${steps.join('')}</ul></div>`:''}
   ${backupDue&&(S.cards.length||S.palaces.length)?`<div class="msg">💾 It’s been a while since your last backup. <button class="ghost" data-go="more">Back up now</button></div>`:''}
   <div class="card"><h3>Quick add</h3><div class="row"><button class="sec" data-go="people">+ Person</button><button class="sec" data-go="palaces">+ Palace</button><button class="sec" id="qdate">+ Date to remember</button></div></div>
@@ -359,7 +405,7 @@ VIEWS.today=function(){
   app.querySelector('#start').onclick=()=>{const s=composeSession();if(s.empty){showGuide();return;}startSession(s);};
   const l1=app.querySelector('#l1');if(l1)l1.onclick=startLesson1;const sp=app.querySelector('#sp');if(sp)sp.onclick=()=>startStarter(false);
   app.querySelector('#qdate').onclick=()=>{go('numbers');ui.sub='dates';render();};
-  bindGo();
+  bindGo();app.querySelectorAll('[data-reh]').forEach(b=>b.onclick=()=>startRehearsal(b.dataset.reh,'today'));
 };
 function showGuide(){const g=app.querySelector('#guide');g.innerHTML=`<div class="card" id="emptyguide"><h3>Nothing to practise yet</h3><p>You’re all caught up — there’s nothing new to study and nothing due to remember today. Here’s what you can do:</p>
   <button class="xl" data-go="learn">Open the next lesson</button><button class="xl sec" data-go="people">+ Add a person you’ve met</button><button class="xl sec" data-go="palaces">+ Build a memory palace</button><button class="xl sec" id="rp">Redo the 5-item practice</button></div>`;
@@ -370,10 +416,11 @@ function bindGo(){app.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.p
 function renderSession(){
   const s=session;if(s.i>=s.tasks.length)return finishSession();
   const t=s.tasks[s.i],pct=Math.round(100*s.i/s.tasks.length),mins=Math.floor((NOW()-s.start)/6e4);
-  const head=`<div class="row mut"><span class="grow">Step ${s.i+1} of ${s.tasks.length} · ${mins} min</span><button class="ghost small" id="endnow">Finish for now</button></div><div class="bar"><i style="width:${pct}%"></i></div>`;
+  const head=`<div class="row mut"><span class="grow">${s.practice?'🔁 Practice only · ':''}Step ${s.i+1} of ${s.tasks.length} · ${mins} min</span><button class="ghost small" id="endnow">Finish for now</button></div><div class="bar"><i style="width:${pct}%"></i></div>`;
   app.innerHTML=head+`<div class="card" id="task" data-type="${t.type}"></div>`;
   app.querySelector('#endnow').onclick=()=>{s.i=s.tasks.length;render();};
   TASKS[t.type](app.querySelector('#task'),t,()=>{s.i++;render();window.scrollTo(0,0);});
+  if(session===s&&s.tasks[s.i]===t)addSpeech(app.querySelector('#task'),t);
 }
 // Skip / Show me helpers: send an item back to study and try it again later. Nothing is recorded.
 function backToStudy(t,studyTask,next){if(session){const s=session;const again=t.requeued?[]:[{...t,requeued:true,fresh:true,hint:true}];
@@ -383,6 +430,8 @@ function backToStudy(t,studyTask,next){if(session){const s=session;const again=t
 function tryLater(t){if(session&&!t.requeued)session.tasks.push({...t,requeued:true,hint:true});}
 function finishSession(){
   const s=session,ok=s.results.filter(r=>r.ok).length,n=s.results.length;
+  if(s.practice){save();session=null;app.innerHTML=`<div class="card" id="pracdone"><h2>Rehearsal done 🔁</h2><p class="mid">${ok} of ${n} remembered</p>${s.tag?`<p class="mut">“${esc(s.tag)}” readiness: ${readiness(s.tag)}%</p>`:''}<div class="msg">Practice only — your normal review schedule and progress stats were not changed.</div><button class="xl" id="done">Back</button><button class="xl sec" id="again">Rehearse again</button></div>`;
+    app.querySelector('#done').onclick=()=>{const b=s.back||'today';go(b);if(b==='people'){ui={sub:'groups'};render();}};app.querySelector('#again').onclick=()=>startRehearsal(s.tag,s.back);nav();return;}
   bumpStreak();const changes=applyAdaptation();
   S.sessions.push({t:NOW(),n,ok,mins:Math.round((NOW()-s.start)/6e4)});S.sessions=S.sessions.slice(-120);save();
   const msg=n&&ok/n<0.7?ENCOURAGE[rnd(ENCOURAGE.length)]:PRAISE[rnd(PRAISE.length)];
@@ -397,7 +446,7 @@ function timer(){const t0=NOW();return ()=>NOW()-t0;}
 function gradeButtons(el,cb){const g=document.createElement('div');
   g.innerHTML='<p class="prompt">How well did you remember it? Tap one:</p><div class="grades"><button class="g1" data-q="1">Again<br><small>forgot</small></button><button class="g3" data-q="3">Hard<br><small>slow</small></button><button class="g4" data-q="4">Good<br><small>got it</small></button><button class="g5" data-q="5">Easy<br><small>instant</small></button></div>';
   g.onclick=e=>{const b=e.target.closest('button');if(b)cb(+b.dataset.q);};el.appendChild(g);}
-function result(skill,ok,ms){if(skill)record(skill,ok,ms);if(session)session.results.push({skill,ok});save();}
+function result(skill,ok,ms){if(skill&&!practicing())record(skill,ok,ms);if(session)session.results.push({skill,ok});save();}
 function feedback(el,ok,text,next){const d=document.createElement('div');d.innerHTML=`<p class="mid ${ok?'ok':'bad'}">${ok?'✓ Yes!':'✗ Not quite'} ${text}</p><button class="xl" id="nx">Next</button>`;el.appendChild(d);d.querySelector('#nx').onclick=next;d.querySelector('#nx').focus();}
 // shared quiz footer: hint / show me / skip — always visible
 function helpers(hint){return `<div class="qa">${hint?'<button class="sec" id="qh">💡 Hint</button>':''}<button class="sec" id="qs">👀 Show me</button></div><button class="ghost" id="qk" style="margin-top:6px">↩︎ Skip — I haven’t learned this</button><p class="mut hide" id="qht"></p>`;}
@@ -415,7 +464,7 @@ const TASKS={
   el.querySelector('#go').onclick=()=>{S.lessonsDone[l.id]=NOW();save();next();};},
  study(el,t,next){const c=S.cards.find(x=>x.id===t.id);if(!c)return next();const x=c.extra||{};let body='';
   if(c.deck==='everyday')body=`<p class="mut">${esc(c.front)}</p><p class="big">${esc(c.back)}</p><div class="msg">🖼 <b>Picture it:</b> ${esc(c.hint)}</div><p class="mut">Close your eyes for 3–5 seconds and really <i>see</i> it — the sillier the better.</p>`;
-  else if(c.deck==='names')body=`${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="big">${esc(c.back)}</p><p class="mid">${esc(x.feature||'')}</p><p class="mut">${x.where?'Met: '+esc(x.where):''}</p>${x.hook?`<div class="msg">🖼 <b>Picture it:</b> ${esc(x.hook)}</div>`:''}<p class="mut">Say the name out loud, and picture the hook sitting on the feature you noticed.</p>`;
+  else if(c.deck==='names')body=`${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="big">${esc(c.back)}</p><p class="mid">${esc(x.feature||'')}</p><p class="mut">${x.where?'Met: '+esc(x.where):''}</p>${x.hook?`<div class="msg">🖼 <b>Picture it:</b> ${esc(x.hook)}</div>`:''}${x.ask?`<p class="mut">About the name: ${esc(x.ask)}</p>`:''}${x.why?`<p class="mut">Why remember: ${esc(x.why)}</p>`:''}<p class="mut">Say the name out loud, and picture the hook sitting on the feature you noticed.</p>`;
   else if(c.deck==='numbers')body=`<p class="big">${esc(c.front)} = ${esc(c.back)}</p><p class="mut">${esc(soundsOf(c.front))}</p><p class="mut">Picture a ${esc(c.back)} for a few seconds.</p>`;
   else body=`<p class="mid">${esc(c.front)}</p><p class="big" style="font-size:30px">${esc(c.back)}</p>${c.hint?`<div class="msg">🖼 <b>Picture it:</b> ${esc(c.hint)}</div>`:''}`;
   el.innerHTML=`<p class="pill">Study · new</p><p class="prompt">Take a moment to learn this. You’ll be asked about it later.</p>${body}<button class="xl" id="go">Got it</button>`;
@@ -432,7 +481,7 @@ const TASKS={
   const sk=skillOf(c),p=sk?params(sk):MODE_PARAMS.steady,el2=timer(),lvl=sk?S.skills[sk].level:1,x=c.extra||{};
   const reverse=c.deck==='names'&&lvl>=4&&p.mult>=1&&Math.random()<0.5&&!t.fresh;
   let front,prompt;
-  if(c.deck==='names'){front=reverse?`<p class="big">${esc(c.back)}</p>`:`${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="mid">${esc(x.feature||'')}</p>${lvl<3&&x.where?`<p class="mut">Met: ${esc(x.where)}</p>`:''}`;
+  if(c.deck==='names'){front=reverse?`<p class="big">${esc(c.back)}</p>`:`${x.photo?`<img class="facebig" src="${x.photo}" alt="">`:''}<p class="mid">${esc(x.feature||'')}</p>${(lvl<3||(!x.feature&&!x.photo))&&x.where?`<p class="mut">Met: ${esc(x.where)}</p>`:''}`;
     prompt=reverse?'Where did you meet this person? Type it in the box, then tap Check.':'What is this person’s name? Type it in the box, then tap Check.';}
   else if(c.deck==='numbers'){front=`<p class="big">${esc(c.front)}</p>`;prompt='What picture-word goes with this number? Type it, then tap Check.';}
   else if(c.deck==='everyday'){front=`<p class="mid">${esc(c.front)}</p>`;prompt='What was this item on your starter list? Type it, then tap Check.';}
@@ -446,7 +495,7 @@ const TASKS={
     el.querySelector('#c').remove();hideHelpers(el);
     el.querySelector('#back').innerHTML=`<hr><p class="mut">Answer:</p><p class="mid">${esc(reverse?(x.feature||'')+' · '+(x.where||''):c.back)}</p>${c.deck==='names'?`<p class="mut">${esc(x.where||'')}${x.hook?' · Hook: '+esc(x.hook):''}</p>`:''}${match}`;
     if(viaShow){tryLater(t);const d=document.createElement('div');d.innerHTML='<p class="mut">No problem — have a good look. It’ll come back later in this practice.</p><button class="xl" id="nx">Next</button>';el.querySelector('#back').appendChild(d);d.querySelector('#nx').onclick=next;return;}
-    gradeButtons(el.querySelector('#back'),q=>{sm2(c,q,p.mult);result(sk,q>=3,ms);next();});};
+    gradeButtons(el.querySelector('#back'),q=>{if(practicing()){c.prac=(c.prac||0)+1;}else{sm2(c,q,p.mult);c.revs=(c.revs||0)+1;c.lastRev=today();}result(sk,q>=3,ms);next();});};
   el.querySelector('#c').onclick=()=>reveal(el.querySelector('#ans').value,false);el.querySelector('#ans').onkeydown=e=>{if(e.key==='Enter')reveal(e.target.value,false);};
   bindHelpers(el,{hint,show:()=>reveal('',true),skip:()=>{c.seen=false;save();backToStudy(t,{type:'study',id:c.id},next);}});},
  num(el,t,next){const el2=timer();el.innerHTML=`<p class="pill">${t.warm?'Easy start':t.win?'Quick win':'Number practice'}</p><p class="big">${t.n}</p>${t.hint?`<p class="mut">Sounds: ${soundsOf(t.n)}</p>`:''}<p class="prompt">What’s the picture-word for this number? Type it in the box, then tap Check.</p><input id="a" placeholder="e.g. a word from your number list" autocomplete="off" autocapitalize="none"><button class="xl" id="c">Check</button>${helpers(soundsOf(t.n))}`;
@@ -475,7 +524,7 @@ const TASKS={
    const m=typed?(norm(typed)===norm(L.item)||norm(L.item).split(' ').includes(norm(typed))):null;
    el.querySelector('#b').innerHTML=`<hr><p class="mut">Answer:</p><p class="mid">${esc(L.item)}</p><p class="mut">${esc(L.image||'')}</p>${m===null?'':`<p class="${m?'ok':'bad'}">${m?'✓ That matches.':'Not an exact match — decide honestly how close you were.'}</p>`}`;
    if(viaShow){tryLater(t);const d=document.createElement('div');d.innerHTML='<p class="mut">No problem — it’ll come back later in this practice.</p><button class="xl" id="nx">Next</button>';el.querySelector('#b').appendChild(d);d.querySelector('#nx').onclick=next;return;}
-   gradeButtons(el.querySelector('#b'),q=>{result('palace',q>=3,ms);const c=S.cards.find(x=>x.extra&&x.extra.locus===L.id);if(c)sm2(c,q,params('palace').mult);save();next();});};
+   gradeButtons(el.querySelector('#b'),q=>{result('palace',q>=3,ms);const c=S.cards.find(x=>x.extra&&x.extra.locus===L.id);if(c){if(practicing())c.prac=(c.prac||0)+1;else{sm2(c,q,params('palace').mult);c.revs=(c.revs||0)+1;c.lastRev=today();}}save();next();});};
   el.querySelector('#c').onclick=()=>reveal(false);el.querySelector('#ans').onkeydown=e=>{if(e.key==='Enter')reveal(false);};
   bindHelpers(el,{hint:L.image||('Starts with “'+L.item.charAt(0)+'”'),show:()=>reveal(true),skip:()=>{L.seen=false;save();backToStudy(t,{type:'studyLocus',pid:t.pid,i:t.i},next);}});},
  listRecall(el,t,next){const cs=t.ids.map(id=>S.cards.find(c=>c.id===id)).filter(Boolean);if(!cs.length)return next();
@@ -519,6 +568,11 @@ VIEWS.help=function(){
   ${sec('Turning dates, times and numbers into pictures',['First do <b>Lesson 6</b> (numbers) — it teaches the sound for each digit.','Go to # <b>Numbers</b> → <b>Converter</b>, type any number, and it shows the picture-word for each pair of digits.','For an appointment, open <b>Dates & times</b>: type what happens, pick the date and time. It suggests one funny scene to picture.','Tap <b>Add to review deck</b> and it will come up in your practice.'])}
   ${sec('Rating your answers: Again / Hard / Good / Easy',['<b>Again</b> — you forgot. It comes back tomorrow.','<b>Hard</b> — you got it, but slowly. It comes back fairly soon.','<b>Good</b> — you got it. The gap before the next review gets longer.','<b>Easy</b> — instant. The gap gets much longer.'],'<p class="mut">Be honest — the app uses these to decide when to show things again and whether to go slower or faster.</p>')}
   ${sec('Backing up',['Go to ⋯ <b>More</b>.','Tap <b>Export JSON</b>. A small file downloads to your phone.','Save it somewhere safe (Google Drive or email it to yourself). Do this weekly.','To restore on a new phone: <b>More</b> → <b>Import JSON</b> and pick that file.'],'<p class="mut">Your data lives only on this phone, so a backup is the only copy.</p>')}
+  ${sec('Meeting someone new: BE SUAVE + Quick add',['When you meet them: <b>Say</b> the name back, <b>Ask</b> about it, picture it (<b>Visualise</b>), <b>Use</b> it while you talk, and <b>End</b> with it when you say goodbye. Lesson 4b explains it.','Straight afterwards, open 🙂 <b>People</b> → <b>⚡ Quick add</b>: type the name and where you met, tap <b>Save</b>. 15 seconds.','Later, tap <b>Edit</b> to add a feature, a hook picture, a note about the name, and why you want to remember them.','Tick the after-meeting checklist (said it back, used it, ended with it). It’s just for you and doesn’t affect your score.'])}
+  ${sec('Groups and rehearsing',['Put people (or a palace, or a date card) into a group by typing a group name, e.g. “Book club”.','Go to 🙂 <b>People</b> → <b>Groups & dates</b> and tap <b>Rehearse a group</b>.','You study anyone you haven’t seen yet, then recall just that group.','Rehearsals are practice only: they don’t change your normal review schedule or progress stats.'])}
+  ${sec('Getting ready for a date (“People I’ll meet”)',['Go to 🙂 <b>People</b> → <b>Groups & dates</b>.','Type a group name and the date you’ll meet them. Add people now, one per line, like <code>Jane :: library volunteer</code>, or add them later.','Tap <b>Create group</b>. Today’s practice will put these people first until the date.','The <b>Today</b> tab shows the countdown and how ready you are. 100% means everyone has been studied and reviewed 3 times.'])}
+  ${sec('Timed names round',['Go to 🙂 <b>People</b> → <b>⏱ Timed round</b>.','Pick a group (or everyone you’ve studied) and how many: 5, 7 or 10.','You get 1 minute to study the faces and names. Tap <b>I’m ready</b> if you finish early.','Type each name and tap <b>Check</b> to see your score and time. It only uses people you’ve already studied, and it’s practice only.'])}
+  ${sec('Read aloud',['On any study card or question, tap <b>🔊 Read aloud</b> to hear it. This works offline with your phone’s own voice (Australian English if your phone has it).','On a new person’s study card you may also see <b>🎤 Say it back</b>. Say the name and the app checks it. If your phone doesn’t support this, the button just won’t appear, and saying it out loud still works.','No 🔊 button? Your browser doesn’t support speech. Everything else still works.'])}
   <div class="card"><h3>Updates</h3><p>If you don’t see the new version, close and reopen the app.</p><p class="mut">Version ${APP_VERSION}</p></div>`;
   app.querySelector('#rt').onclick=()=>{tour=0;render();window.scrollTo(0,0);};
 };
@@ -527,12 +581,13 @@ VIEWS.help=function(){
 const TEMPLATE_LOCI=['Front gate','Path / car park','Front door','Entry mat','First shelf on the left','Counter','Window','Back room door','Treatment table / couch','Back door'];
 VIEWS.palaces=function(){
   if(ui.pid){const p=S.palaces.find(x=>x.id===ui.pid);if(!p){ui={};return render();}
-   app.innerHTML=`<button class="ghost" id="bk">← Palaces</button><div class="card"><h2>${esc(p.name)}</h2><p class="mut">Walk the route in order. Give each stop a fixed name, then attach an item and the vivid image that links them.</p>
+   app.innerHTML=`<button class="ghost" id="bk">← Palaces</button><div class="card"><h2>${esc(p.name)}</h2><p class="mut">Walk the route in order. Give each stop a fixed name, then attach an item and the vivid image that links them.</p><label>Groups (comma-separated, optional)</label><div class="row"><input id="ptags" class="grow" value="${esc((p.tags||[]).join(', '))}" placeholder="e.g. Shopping"><button class="small" id="ptsv">Save groups</button></div>
    <ul class="clean">${p.loci.map((l,i)=>`<li><b>${i+1}. ${esc(l.name)}</b>${l.item?`<br>📌 ${esc(l.item)}<br><span class="mut">${esc(l.image||'')}</span>`:'<br><span class="mut">empty</span>'}<div class="row"><button class="ghost small" data-e="${i}">Edit</button><button class="ghost small" data-up="${i}">↑</button><button class="ghost small" data-del="${i}">Remove</button></div></li>`).join('')}</ul>
    <label>New stop</label><div class="row"><input id="ln" class="grow" placeholder="e.g. Crystal cabinet"><button id="add" class="small">Add</button></div></div>
    <div class="card" id="ed"></div>
    <div class="card row"><button id="walk">Practise this palace</button><button class="sec" id="clr">Clear items</button><button class="sec" id="rm">Delete palace</button></div>`;
    app.querySelector('#bk').onclick=()=>{ui={};render();};
+   app.querySelector('#ptsv').onclick=()=>{p.tags=parseTags(app.querySelector('#ptags').value);save();render();};
    app.querySelector('#add').onclick=()=>{const v=app.querySelector('#ln').value.trim();if(v){p.loci.push({id:uid(),name:v,item:'',image:''});save();render();}};
    app.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const l=p.loci.splice(+b.dataset.del,1)[0];S.cards=S.cards.filter(c=>!(c.extra&&c.extra.locus===l.id));save();render();});
    app.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>{const i=+b.dataset.up;if(i>0){[p.loci[i-1],p.loci[i]]=[p.loci[i],p.loci[i-1]];save();render();}});
@@ -553,30 +608,109 @@ VIEWS.palaces=function(){
 
 /* ---------- People ---------- */
 function resizePhoto(file,cb){const r=new FileReader();r.onload=()=>{const img=new Image();img.onload=()=>{const s=200,c=document.createElement('canvas'),k=Math.min(1,s/Math.max(img.width,img.height));c.width=img.width*k;c.height=img.height*k;c.getContext('2d').drawImage(img,0,0,c.width,c.height);cb(c.toDataURL('image/jpeg',0.7));};img.src=r.result;};r.readAsDataURL(file);}
+const CHECKS=[['said','Said it back'],['used','Used it in conversation'],['ended','Ended with it']];
+function addPerson(name,where,more){const extra={where:where||'',feature:'',hook:'',photo:'',ask:'',why:'',tags:[],check:{},...(more||{})};
+  const c=newCard('names',extra.feature||extra.where||'?',name,{...extra,hint:extra.hook});S.cards.push(c);return c;}
+function importGroupLines(tag,txt){let n=0;String(txt||'').split('\n').forEach(line=>{line=line.trim();if(!line)return;const [name,notes]=line.split('::').map(s=>(s||'').trim());if(!name)return;addPerson(name,notes||'',{tags:tag?[tag]:[]});n++;});return n;}
+function tagPills(tags){return (tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join(' ');}
+function peopleTabs(sub){return `<h2>Names & faces</h2><div class="row">${[['list','People'],['groups','Groups & dates'],['timed','⏱ Timed round']].map(t=>`<button class="small ${sub===t[0]?'':'sec'}" data-psub="${t[0]}">${t[1]}</button>`).join('')}</div>`;}
+function bindPeopleTabs(){app.querySelectorAll('[data-psub]').forEach(b=>b.onclick=()=>{ui={sub:b.dataset.psub};render();});}
 VIEWS.people=function(){
+  const sub=ui.sub||'list';
+  if(sub==='groups')return peopleGroups();
+  if(sub==='timed')return peopleTimed();
   const people=S.cards.filter(c=>c.deck==='names');const q=norm(ui.q||'');
-  const list=people.filter(c=>!q||norm(c.back+' '+c.extra.where+' '+c.extra.feature).includes(q));
+  const list=people.filter(c=>!q||norm(c.back+' '+c.extra.where+' '+c.extra.feature+' '+tagsOf(c).join(' ')).includes(q));
   const ed=ui.edit?S.cards.find(c=>c.id===ui.edit):null,x=ed?ed.extra:{};
-  app.innerHTML=`<h2>Names & faces</h2><div class="card"><h3>${ed?'Edit':'Add a person'}</h3>
+  const tl=Object.keys(allTags());
+  app.innerHTML=peopleTabs(sub)+`${ui.flash?`<div class="msg ok" id="flash">${esc(ui.flash)}</div>`:''}
+  ${ed?'':`<div class="card"><h3>⚡ Quick add <span class="mut">· 15 seconds</span></h3><p class="mut">Just met someone? Name and where. You can add the rest later.</p>
+  <label>Name</label><input id="qn" placeholder="e.g. Martin" autocomplete="off"><label>Where you met</label><input id="qw" placeholder="e.g. Community meeting, 7 Oct" autocomplete="off">
+  <label>Group (optional)</label><input id="qt" list="taglist" placeholder="e.g. Book club" autocomplete="off"><datalist id="taglist">${tl.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+  <button class="xl" id="qa">Save</button></div>`}
+  <details class="card" ${ed?'open':''}><summary><b>${ed?'Edit '+esc(ed.back):'Add with full details'}</b></summary>
   <label>Name</label><input id="nm" value="${esc(ed?ed.back:'')}" placeholder="e.g. Martin">
   <label>Where / when you met</label><input id="wh" value="${esc(x.where||'')}" placeholder="e.g. Community meeting, 7 Oct">
   <label>Most distinctive feature</label><input id="ft" value="${esc(x.feature||'')}" placeholder="e.g. bushy eyebrows, blue glasses">
-  <label>Hook image (name → picture, fixed on the feature)</label><textarea id="hk" placeholder="e.g. “mine dirt” pouring out of his eyebrows">${esc(x.hook||'')}</textarea>
+  <label>Visualise: hook image (name → picture, fixed on the feature)</label><textarea id="hk" placeholder="e.g. Rosa → a red rose tucked behind her ear">${esc(x.hook||'')}</textarea>
+  <label>Ask about the name (spelling, where it’s from)</label><input id="ask" value="${esc(x.ask||'')}" placeholder="e.g. Rosa with one s — Italian, after her grandmother">
+  <label>Why I want to remember them</label><input id="why" value="${esc(x.why||'')}" placeholder="e.g. Runs the seed swap — ask about tomatoes">
+  <label>Groups (comma-separated)</label><input id="tg" value="${esc(tagsOf(ed||{}).join(', '))}" list="taglist" placeholder="e.g. Book club">
   <label>Photo (optional, stays on this phone)</label><input type="file" id="ph" accept="image/*">${x.photo?`<img class="face" src="${x.photo}">`:''}
-  <div class="row" style="margin-top:8px"><button id="sv">${ed?'Save':'Add person'}</button>${ed?'<button class="sec" id="cn">Cancel</button><button class="sec" id="dl">Delete</button>':''}</div></div>
-  <input id="q" placeholder="Search people…" value="${esc(ui.q||'')}">
-  <ul class="clean card">${list.map(c=>`<li class="row">${c.extra.photo?`<img class="face" src="${c.extra.photo}">`:''}<div class="grow"><b>${esc(c.back)}</b><br><span class="mut">${esc(c.extra.where||'')} · ${esc(c.extra.feature||'')}</span></div><button class="ghost small" data-ed="${c.id}">Edit</button></li>`).join('')||'<li class="mut">No one yet. Add people you meet — colleagues, clients, neighbours.</li>'}</ul>`;
+  <div class="row" style="margin-top:8px"><button id="sv">${ed?'Save':'Add person'}</button>${ed?'<button class="sec" id="cn">Cancel</button><button class="sec" id="dl">Delete</button>':''}</div></details>
+  <input id="q" placeholder="Search people or groups…" value="${esc(ui.q||'')}">
+  <ul class="clean card">${list.map(c=>{const e=c.extra||{},ck=e.check||{};return `<li><div class="row">${e.photo?`<img class="face" src="${e.photo}">`:''}<div class="grow"><b>${esc(c.back)}</b> ${c.seen?'':'<span class="pill">new — study in Today</span>'}<br><span class="mut">${esc(e.where||'')}${e.feature?' · '+esc(e.feature):''}</span>${e.why?`<br><span class="mut">Why: ${esc(e.why)}</span>`:''}${tagsOf(c).length?'<br>'+tagPills(tagsOf(c)):''}</div><button class="ghost small" data-ed="${c.id}">Edit</button></div>
+   <div class="mut" style="margin-top:4px">After meeting (just for you, not scored):</div><div class="row">${CHECKS.map(k=>`<button class="chip ${ck[k[0]]?'on':''}" data-chk="${c.id}" data-k="${k[0]}">${ck[k[0]]?'☑':'☐'} ${k[1]}</button>`).join('')}</div></li>`;}).join('')||'<li class="mut">No one yet. Add people you meet — colleagues, clients, neighbours.</li>'}</ul>`;
   let photo=x.photo||'';
+  const qa=app.querySelector('#qa');if(qa){const quick=()=>{const name=app.querySelector('#qn').value.trim();if(!name)return alert('Add a name.');addPerson(name,app.querySelector('#qw').value.trim(),{tags:parseTags(app.querySelector('#qt').value)});save();ui={flash:`Saved ${name}. They’ll be a study card in your next practice.`};render();};
+    qa.onclick=quick;app.querySelector('#qw').onkeydown=e=>{if(e.key==='Enter')quick();};}
   app.querySelector('#ph').onchange=e=>{const f=e.target.files[0];if(f)resizePhoto(f,d=>{photo=d;});};
   app.querySelector('#sv').onclick=()=>{const v=id=>app.querySelector(id).value.trim(),name=v('#nm');if(!name)return alert('Add a name.');
-    const extra={where:v('#wh'),feature:v('#ft'),hook:v('#hk'),photo};
-    if(ed){ed.back=name;ed.extra=extra;ed.front=extra.feature||extra.where;ed.hint=extra.hook;}else S.cards.push(newCard('names',extra.feature||extra.where||'?',name,{...extra,hint:extra.hook}));
-    save();ui={};render();};
+    const extra={...(ed?ed.extra:{check:{}}),where:v('#wh'),feature:v('#ft'),hook:v('#hk'),ask:v('#ask'),why:v('#why'),tags:parseTags(v('#tg')),photo};
+    if(ed){const changed=ed.back!==name||(ed.extra.hook||'')!==extra.hook||(ed.extra.feature||'')!==extra.feature;ed.back=name;ed.extra=extra;ed.front=extra.feature||extra.where||'?';ed.hint=extra.hook;if(changed)ed.seen=false;}
+    else{const c=newCard('names',extra.feature||extra.where||'?',name,{...extra,hint:extra.hook});S.cards.push(c);}
+    save();ui={flash:ed?'Saved.':`Added ${name}. They’ll be a study card in your next practice.`};render();};
   const cn=app.querySelector('#cn');if(cn)cn.onclick=()=>{ui={};render();};
   const dl=app.querySelector('#dl');if(dl)dl.onclick=()=>{if(confirm('Delete '+ed.back+'?')){S.cards=S.cards.filter(c=>c!==ed);save();ui={};render();}};
   app.querySelector('#q').oninput=e=>{ui.q=e.target.value;const pos=e.target.selectionStart;render();const i=app.querySelector('#q');i.focus();i.setSelectionRange(pos,pos);};
   app.querySelectorAll('[data-ed]').forEach(b=>b.onclick=()=>{ui.edit=b.dataset.ed;render();window.scrollTo(0,0);});
+  app.querySelectorAll('[data-chk]').forEach(b=>b.onclick=()=>{const c=S.cards.find(x=>x.id===b.dataset.chk);if(!c)return;c.extra.check=c.extra.check||{};c.extra.check[b.dataset.k]=!c.extra.check[b.dataset.k];save();const keep={q:ui.q};ui=keep;render();});
+  bindPeopleTabs();
 };
+function peopleGroups(){
+  const tags=allTags(),t0=today();
+  const dls=S.groups.filter(g=>g.target).sort((a,b)=>a.target.localeCompare(b.target));
+  app.innerHTML=peopleTabs('groups')+`${ui.flash?`<div class="msg ok">${esc(ui.flash)}</div>`:''}
+  <div class="card"><h3>📅 People I’ll meet</h3><p class="mut">Getting ready for an event? Make a group with the date. Until then, today’s practice puts these people first, so each one is studied and reviewed at least 3 times before the day.</p>
+  <label>Group name</label><input id="gn" placeholder="e.g. Conference, new class, wedding"><label>Date you’ll meet them</label><input type="date" id="gd">
+  <label>Add people now (optional). One per line: <code>Name :: where / notes</code></label><textarea id="gi" placeholder="Jane :: library volunteer"></textarea><button class="xl" id="gc">Create group</button></div>
+  ${dls.map(g=>{const d=dayNum(g.target)-t0,r=readiness(g.tag),n=groupCards(g.tag).length;return `<div class="card"><div class="row"><b class="grow">${esc(g.tag)}</b><span class="mut">${d>0?d+' day'+(d===1?'':'s')+' to go':d===0?'Today!':'Date passed'}</span></div>
+   <p class="mut">${esc(g.target)} · ${n} ${n===1?'person':'people'} · ${r}% ready</p><div class="bar"><i style="width:${r}%"></i></div>
+   <div class="row" style="margin-top:8px"><button class="small" data-reh="${esc(g.tag)}">Rehearse</button><button class="small sec" data-gadd="${g.id}">+ Add people</button><button class="small sec" data-gdel="${g.id}">Remove date</button></div>
+   ${ui.addTo===g.id?`<label>One per line: Name :: where / notes</label><textarea id="ga"></textarea><button class="small" id="gas">Add</button>`:''}</div>`;}).join('')}
+  <div class="card"><h3>All groups</h3><p class="mut">Rehearse = a quick practice run over just that group. It doesn’t change your normal review schedule or stats.</p>
+  <ul class="clean">${Object.keys(tags).map(t=>`<li class="row"><span class="grow"><b>${esc(t)}</b> <span class="mut">${tags[t]} item${tags[t]===1?'':'s'}</span></span><button class="small" data-reh="${esc(t)}">Rehearse a group</button></li>`).join('')||'<li class="mut">No groups yet. Add a group when you add a person, or tag a palace.</li>'}</ul></div>`;
+  app.querySelector('#gc').onclick=()=>{const name=app.querySelector('#gn').value.trim(),date=app.querySelector('#gd').value;if(!name)return alert('Give the group a name.');
+    if(date){const g=S.groups.find(x=>tagEq(x.tag,name));if(g)g.target=date;else S.groups.push({id:uid(),tag:name,target:date});}
+    const n=importGroupLines(name,app.querySelector('#gi').value);save();ui={sub:'groups',flash:`Group “${name}” ready${n?' with '+n+' '+(n===1?'person':'people'):''}.`};render();};
+  app.querySelectorAll('[data-gadd]').forEach(b=>b.onclick=()=>{ui.addTo=b.dataset.gadd;render();});
+  const gas=app.querySelector('#gas');if(gas)gas.onclick=()=>{const g=S.groups.find(x=>x.id===ui.addTo);const n=importGroupLines(g.tag,app.querySelector('#ga').value);save();ui={sub:'groups',flash:`Added ${n} to ${g.tag}.`};render();};
+  app.querySelectorAll('[data-gdel]').forEach(b=>b.onclick=()=>{if(confirm('Remove the date? The people stay.')){S.groups=S.groups.filter(x=>x.id!==b.dataset.gdel);save();render();}});
+  app.querySelectorAll('[data-reh]').forEach(b=>b.onclick=()=>startRehearsal(b.dataset.reh,'people'));
+  bindPeopleTabs();
+}
+function timedPool(tag){return S.cards.filter(c=>c.deck==='names'&&c.seen&&(!tag||tagsOf(c).some(t=>tagEq(t,tag))));}
+function peopleTimed(){
+  const tr=ui.tr;
+  if(tr&&tr.phase==='study'){const items=tr.items.map(id=>S.cards.find(c=>c.id===id));
+    app.innerHTML=peopleTabs('timed')+`<div class="card"><p class="prompt">Study these faces and names. You have 1 minute.</p><p class="big" id="tcd">60</p>
+    <div class="tgrid">${items.map(c=>`<div class="card">${c.extra.photo?`<img class="face" src="${c.extra.photo}">`:''}<b style="font-size:18px">${esc(c.back)}</b><br><span class="mut">${esc(c.extra.feature||c.extra.where||'')}</span></div>`).join('')}</div>
+    <button class="xl" id="tready">I’m ready</button></div>`;
+    const toRecall=()=>{tr.phase='recall';tr.recallStart=NOW();tr.order=shuffle(tr.items);render();};
+    app.querySelector('#tready').onclick=toRecall;
+    tick=setInterval(()=>{const left=Math.max(0,60-Math.floor((NOW()-tr.start)/1000));const e=document.getElementById('tcd');if(e)e.textContent=left;if(left<=0)toRecall();},250);
+    bindPeopleTabs();return;}
+  if(tr&&tr.phase==='recall'){const items=tr.order.map(id=>S.cards.find(c=>c.id===id));
+    app.innerHTML=peopleTabs('timed')+`<div class="card"><p class="prompt">Type each person’s name, then tap Check. The clock is running.</p>
+    ${items.map((c,i)=>`<div class="card">${c.extra.photo?`<img class="face" src="${c.extra.photo}">`:''}<span class="mut">${esc(c.extra.feature||'')}${c.extra.feature&&c.extra.where?' · ':''}${esc(c.extra.where||'')}</span><input data-ti="${i}" placeholder="Name" autocomplete="off"></div>`).join('')}
+    <button class="xl" id="tcheck">Check</button></div>`;
+    app.querySelector('#tcheck').onclick=()=>{const ms=NOW()-tr.recallStart;let score=0;tr.res=items.map((c,i)=>{const v=norm(app.querySelector(`[data-ti="${i}"]`).value),ok=!!v&&(v===norm(c.back)||norm(c.back).split(' ')[0]===v);if(ok)score++;return {id:c.id,ok,typed:v};});
+      tr.score=score;tr.ms=ms;tr.phase='done';const best=Math.max(0,...S.timedLog.filter(l=>l.n===items.length).map(l=>l.score));tr.best=best;S.timedLog.push({t:NOW(),n:items.length,score,ms,tag:tr.tag||''});S.timedLog=S.timedLog.slice(-50);save();render();};
+    bindPeopleTabs();return;}
+  if(tr&&tr.phase==='done'){app.innerHTML=peopleTabs('timed')+`<div class="card"><h2>${tr.score} of ${tr.items.length} in ${(tr.ms/1000).toFixed(1)}s</h2>${tr.best&&tr.score>tr.best?'<p class="ok">New best! 🎉</p>':tr.best?`<p class="mut">Your best: ${tr.best} of ${tr.items.length}</p>`:''}
+    <ul class="clean">${tr.res.map(r=>{const c=S.cards.find(x=>x.id===r.id);return `<li>${r.ok?'✓':'✗'} <b>${esc(c.back)}</b> <span class="mut">${esc(c.extra.feature||c.extra.where||'')}</span></li>`;}).join('')}</ul>
+    <p class="mut">Practice only — this doesn’t change your review schedule or stats.</p><button class="xl" id="tagain">Try again</button><button class="xl sec" id="tback">Done</button></div>`;
+    app.querySelector('#tagain').onclick=()=>{ui={sub:'timed',tsel:tr.tag,tn:tr.items.length};render();};app.querySelector('#tback').onclick=()=>{ui={sub:'timed'};render();};bindPeopleTabs();return;}
+  const tags=Object.keys(allTags()),tag=ui.tsel||'',pool=timedPool(tag),n=ui.tn||5;
+  app.innerHTML=peopleTabs('timed')+`<div class="card"><h3>⏱ Timed names round</h3><p class="mut">Like a memory sport: 1 minute to study 5–10 faces and names, then type the names as fast as you can. Only uses people you’ve already studied. Practice only — it doesn’t change your schedule.</p>
+  <label>Who</label><select id="tsel"><option value="">All studied people</option>${tags.map(t=>`<option ${tagEq(t,tag)?'selected':''} value="${esc(t)}">${esc(t)}</option>`).join('')}</select>
+  <label>How many</label><select id="tn">${[5,7,10].map(k=>`<option ${k===n?'selected':''}>${k}</option>`).join('')}</select>
+  <p class="mut">${pool.length} studied ${pool.length===1?'person':'people'} available.</p>
+  ${pool.length>=2?'<button class="xl" id="tst">Start the round</button>':'<div class="msg">Study at least 2 people first: add them in People, then do today’s practice.</div>'}</div>`;
+  app.querySelector('#tsel').onchange=e=>{ui.tsel=e.target.value;render();};app.querySelector('#tn').onchange=e=>{ui.tn=+e.target.value;render();};
+  const st=app.querySelector('#tst');if(st)st.onclick=()=>{const items=shuffle(pool).slice(0,Math.min(n,pool.length)).map(c=>c.id);ui={sub:'timed',tr:{phase:'study',items,start:NOW(),tag}};render();};
+  bindPeopleTabs();
+}
 
 /* ---------- Numbers / dates ---------- */
 VIEWS.numbers=function(){
@@ -584,7 +718,7 @@ VIEWS.numbers=function(){
   const tabs=`<div class="row">${[['convert','Converter'],['dates','Dates & times'],['drill','Practice'],['list','My number list']].map(t=>`<button class="small ${sub===t[0]?'':'sec'}" data-sub="${t[0]}">${t[1]}</button>`).join('')}</div>`;
   let body='';
   if(sub==='convert')body=`<div class="card"><h3>Number → images</h3><input id="nn" inputmode="numeric" placeholder="e.g. 0427 555 123"><div id="out"></div></div><div class="card"><h3>Key</h3><table>${MAJOR_KEY.map(k=>`<tr><td><b>${k[0]}</b></td><td>${k[1]}</td></tr>`).join('')}</table></div>`;
-  if(sub==='dates')body=`<div class="card"><h3>Date / time → images</h3><label>What happens</label><input id="ev" placeholder="e.g. Dentist appointment"><label>Date</label><input type="date" id="dd"><label>Time (optional)</label><input type="time" id="tt"><div id="dout"></div><button id="dadd" style="margin-top:8px">Add to review deck</button></div>`;
+  if(sub==='dates')body=`<div class="card"><h3>Date / time → images</h3><label>What happens</label><input id="ev" placeholder="e.g. Dentist appointment"><label>Date</label><input type="date" id="dd"><label>Time (optional)</label><input type="time" id="tt"><label>Group (optional)</label><input id="dtag" placeholder="e.g. Appointments"><div id="dout"></div><button id="dadd" style="margin-top:8px">Add to review deck</button></div>`;
   if(sub==='drill')body=`<div class="card" id="task"></div>`;
   if(sub==='list')body=`<div class="card"><p class="mut">One word per line, 00 to 99. Pick nouns you can see and touch. Changes apply everywhere.</p><textarea id="ml" style="min-height:300px">${[...Array(100).keys()].map(i=>pad2(i)+' '+S.major[pad2(i)]).join('\n')}</textarea><div id="mlw" class="mut"></div><button id="msv">Save list</button></div>`;
   app.innerHTML=`<h2>Numbers, dates & times</h2>${tabs}${body}`;
@@ -593,7 +727,7 @@ VIEWS.numbers=function(){
   if(sub==='dates'){const upd=()=>{const ch=dateToChunks(app.querySelector('#dd').value,app.querySelector('#tt').value);app.querySelector('#dout').innerHTML='<ul class="clean">'+ch.map(c=>`<li>${c.label} <b>${c.c}</b> → ${esc(c.w)}</li>`).join('')+'</ul>'+(ch.length?`<p class="msg">Scene idea: ${esc(app.querySelector('#ev').value||'the event')} with ${ch.map(c=>'a '+c.w).join(', ')} — all in one picture, placed where it happens.</p>`:'');};
     ['#dd','#tt','#ev'].forEach(s=>app.querySelector(s).oninput=upd);
     app.querySelector('#dadd').onclick=()=>{const ev=app.querySelector('#ev').value.trim(),d=app.querySelector('#dd').value,t=app.querySelector('#tt').value;if(!ev||!d)return alert('Add the event and a date.');
-      const [y,m,dd]=d.split('-');const ch=dateToChunks(d,t);S.cards.push(newCard('dates',`When is: ${ev}?`,`${dd}/${m}/${y}${t?' at '+t:''}`,{hint:ch.map(c=>c.w).join(' + ')}));save();alert('Added.');};}
+      const [y,m,dd]=d.split('-');const ch=dateToChunks(d,t);S.cards.push(newCard('dates',`When is: ${ev}?`,`${dd}/${m}/${y}${t?' at '+t:''}`,{hint:ch.map(c=>c.w).join(' + '),tags:parseTags(app.querySelector('#dtag').value)}));save();alert('Added.');};}
   if(sub==='drill'){const run=()=>{const t=(Math.random()<0.6?numberTask():dateTask())||numberTask();const el=app.querySelector('#task');if(!t){el.innerHTML='<h3>Nothing to drill yet</h3><p>You haven’t learned any number pictures yet. Do Lesson 6 first, then learn your first pictures.</p><button class="xl" id="gl">Go to Lesson 6</button>';el.querySelector('#gl').onclick=()=>{tab='learn';ui={lesson:'major'};render();};return;}TASKS[t.type](el,t,run);};run();}
   if(sub==='list')app.querySelector('#msv').onclick=()=>{const bad=[];app.querySelector('#ml').value.split('\n').forEach(line=>{const m=line.trim().match(/^(\d\d)\s+(.+)$/);if(m){S.major[m[1]]=m[2].trim();if(majorEncode(m[2])!==m[1])bad.push(m[1]+' '+m[2]);}});save();
     app.querySelector('#mlw').innerHTML=bad.length?'Saved. These may not follow the sounds (the checker is approximate, so silent letters can fool it): '+esc(bad.join(', ')):'Saved ✓';};
@@ -614,7 +748,7 @@ VIEWS.progress=function(){
 VIEWS.more=function(){
   app.innerHTML=`<h2>Backup & settings</h2><button class="xl sec" data-go="help">Help & instructions</button>
   <div class="card"><h3>Backup</h3><p class="mut">Everything lives only in this browser. Export weekly and keep the file in Dropbox/Drive.${S.lastBackup?' Last export: '+new Date(S.lastBackup).toLocaleDateString():''}</p><div class="row"><button id="ex">Export JSON</button><label class="btn sec" style="margin:0;color:var(--ink)">Import JSON<input type="file" id="im" accept=".json,application/json" class="hide"></label></div></div>
-  <div class="card"><h3>Import cards from notes (e.g. Obsidian)</h3><p class="mut">One per line: <code>front :: back</code>. Start a line with <code>#names</code>, <code>#dates</code>, <code>#palace</code> or <code>#numbers</code> to set the deck for the lines after it. For #names use <code>Name :: where met :: feature :: hook</code>.</p><textarea id="tx"></textarea><button id="ti">Import lines</button></div>
+  <div class="card"><h3>Import cards from notes (e.g. Obsidian)</h3><p class="mut">One per line: <code>front :: back</code>. Start a line with <code>#names</code>, <code>#dates</code>, <code>#palace</code> or <code>#numbers</code> to set the deck for the lines after it. For #names use <code>Name :: where met :: feature :: hook</code>. A line like <code>@Book club</code> puts the lines after it in that group.</p><textarea id="tx"></textarea><button id="ti">Import lines</button></div>
   <div class="card"><h3>Settings</h3><label>Daily session length (minutes)</label><select id="mn">${[5,10,15,20].map(m=>`<option ${S.settings.minutes==m?'selected':''}>${m}</option>`).join('')}</select><button class="sec" id="rs" style="margin-top:12px">Reset everything</button></div>
   <p class="mut">Free, offline, private. Not affiliated with any commercial memory app.</p>`;
   app.querySelector('#ex').onclick=()=>{S.lastBackup=NOW();save();const b=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='memory-trainer-backup-'+new Date().toISOString().slice(0,10)+'.json';document.body.appendChild(a);a.click();a.remove();};
@@ -624,15 +758,15 @@ VIEWS.more=function(){
   app.querySelector('#rs').onclick=()=>{if(confirm('Delete ALL data on this phone? Export first if unsure.')){S=freshState();save();go('today');}};
   bindGo();
 };
-function importLines(txt){let deck='custom',n=0;txt.split('\n').forEach(line=>{line=line.trim();const tag=line.match(/^#(names|dates|palace|numbers|custom)\b/i);if(tag){deck=tag[1].toLowerCase();return;}
+function importLines(txt){let deck='custom',n=0,itag='';txt.split('\n').forEach(line=>{line=line.trim();const g=line.match(/^@(.+)$/);if(g){itag=g[1].trim();return;}const tag=line.match(/^#(names|dates|palace|numbers|custom)\b/i);if(tag){deck=tag[1].toLowerCase();return;}
   const parts=line.split('::').map(s=>s.trim());if(parts.length<2||!parts[0])return;
-  if(deck==='names')S.cards.push(newCard('names',parts[2]||parts[1],parts[0],{where:parts[1]||'',feature:parts[2]||'',hook:parts[3]||'',hint:parts[3]||''}));
-  else S.cards.push(newCard(deck==='custom'?'dates':deck,parts[0],parts[1]));n++;});return n;}
+  if(deck==='names')S.cards.push(newCard('names',parts[2]||parts[1],parts[0],{where:parts[1]||'',feature:parts[2]||'',hook:parts[3]||'',hint:parts[3]||'',tags:itag?[itag]:[],check:{}}));
+  else S.cards.push(newCard(deck==='custom'?'dates':deck,parts[0],parts[1],{tags:itag?[itag]:[]}));n++;});return n;}
 
 /* ================= boot ================= */
 load();if(!S.onboarded)tour=0;render();
 if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('sw.js').then(r=>r&&r.update&&r.update()).catch(()=>{});
-window.MT={get S(){return S;},set S(v){S=v;},freshState,profile,composeSession,applyAdaptation,sm2,majorEncode,majorOk,dateToChunks,numberToWords,record,params,overallMode,newCard,importLines,setNow:f=>{NOW=f;},today,TASKS,render,go,save,load,learnedNums,ensureStarter,startStarter,startLesson1,RECALL_TYPES,STUDY_TYPES,get tour(){return tour;},set tour(v){tour=v;},get session(){return session;},APP_VERSION};
+window.MT={get S(){return S;},set S(v){S=v;},freshState,profile,composeSession,applyAdaptation,sm2,majorEncode,majorOk,dateToChunks,numberToWords,record,params,overallMode,newCard,importLines,setNow:f=>{NOW=f;},today,TASKS,render,go,save,load,learnedNums,ensureStarter,startStarter,startLesson1,RECALL_TYPES,STUDY_TYPES,get tour(){return tour;},set tour(v){tour=v;},get session(){return session;},APP_VERSION,readiness,groupCards,allTags,activeDeadlines,rehearsalTasks,startRehearsal,timedPool,importGroupLines,addPerson,dayNum,get TTS(){return TTS;},get SRec(){return SRec;}};
 </script>
 </body>
 </html>
